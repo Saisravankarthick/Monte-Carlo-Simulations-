@@ -1,0 +1,44 @@
+name: Data audit
+
+# Actions tab → "Data audit" → Run workflow
+# Re-downloads Yahoo Finance prices and checks them against the Markov model repo's report (data/markov_stats.json).
+on:
+  workflow_dispatch:
+    inputs:
+      config:
+        description: "Config file that lists the ETFs"
+        default: "config/markov_etfs.toml"
+      summary:
+        description: "fund_summary.csv from the simulation run to check"
+        default: "results_markov_etfs/tables/fund_summary.csv"
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Tests
+        run: uv run --with pytest python -m pytest -q
+      - name: Audit
+        env:
+          CONFIG: ${{ inputs.config }}
+          SUMMARY: ${{ inputs.summary }}
+        run: |
+          set -o pipefail
+          uv run python -m mcsim.audit --config "$CONFIG" --markov data/markov_stats.json --summary "$SUMMARY" --out data_check 2>&1 | { grep -v "Warning\|^See https\|\.set_index\|\.sort_index\|\.rename\|\.drop" || true; }
+          cat data_check/DATA_CHECK.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Commit results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A data_check
+          if git diff --cached --quiet; then echo "No changes."; else
+            git commit -m "Update data check"
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
