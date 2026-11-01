@@ -7,6 +7,10 @@ results/charts/
   4_distributions/   where $X ends up, per fund
   5_regimes/         Bear / Sideways / Bull mix, and today's regime
   6_diversification/ how the funds move together
+
+With [report] layout = "two_sections" in the config, charts go into two folders instead:
+  1_bar_diagrams/          every bar chart
+  2_simulation_prediction/ prediction fans, simulated paths, outcome distributions
 """
 
 from __future__ import annotations
@@ -20,6 +24,9 @@ from .core import TD
 
 CATEGORIES = {"overview": "1_overview", "risk": "2_risk_return", "paths": "3_paths", "dist": "4_distributions",
               "regimes": "5_regimes", "div": "6_diversification"}
+TWO_SECTIONS = {"overview": "1_bar_diagrams", "risk": "1_bar_diagrams", "regimes": "1_bar_diagrams",
+                "paths": "2_simulation_prediction", "dist": "2_simulation_prediction", "div": None}
+NOT_IN_TWO_SECTIONS = {"growth_vs_worst_fall", "correlation_heatmap"}  # neither a bar chart nor a prediction
 
 
 def make_all(cfg: dict, assets: dict, corr, outdir: Path) -> dict[str, list[str]]:
@@ -27,6 +34,8 @@ def make_all(cfg: dict, assets: dict, corr, outdir: Path) -> dict[str, list[str]
     plt = style.setup()
     from matplotlib.ticker import FuncFormatter
 
+    two = cfg.get("report", {}).get("layout") == "two_sections"
+    folders = TWO_SECTIONS if two else CATEGORIES
     made: dict[str, list[str]] = {k: [] for k in CATEGORIES}
     fmt_money = FuncFormatter(style.money)
     inv = next(iter(assets.values()))["sums"]["history"]["invested"]
@@ -35,7 +44,10 @@ def make_all(cfg: dict, assets: dict, corr, outdir: Path) -> dict[str, list[str]
     color = style.fund_colors(order)
 
     def save(fig, cat, name):
-        d = outdir / CATEGORIES[cat]
+        if two and (folders[cat] is None or name in NOT_IN_TWO_SECTIONS):
+            plt.close(fig)
+            return
+        d = outdir / folders[cat]
         d.mkdir(parents=True, exist_ok=True)
         p = d / f"{name}.png"
         fig.savefig(p, dpi=120, bbox_inches="tight")
@@ -115,6 +127,26 @@ def make_all(cfg: dict, assets: dict, corr, outdir: Path) -> dict[str, list[str]
     # ---------------------------------------------------------------- 3 paths
     ncol = 4
     nrow = -(-len(order) // ncol)
+    fig, axes = plt.subplots(nrow, ncol, figsize=(4.2 * ncol, 3.0 * nrow), squeeze=False, constrained_layout=True)
+    for ax, a in zip(axes.ravel(), order):
+        sim = assets[a]["sims"]["history"]
+        xs = sim["sample_idx"] / TD
+        q = np.percentile(sim["values"], [5, 25, 50, 75, 95], axis=0)
+        ax.fill_between(xs, q[0], q[4], color=color[a], alpha=0.18, lw=0)
+        ax.fill_between(xs, q[1], q[3], color=color[a], alpha=0.45, lw=0)
+        ax.plot(xs, q[2], color=color[a], lw=2.2)
+        ax.axhline(inv, color=style.ZONE["short"], lw=1, ls="--")
+        ax.text(xs[-1], q[2][-1], f" {style.money(q[2][-1])}", fontsize=8.5, fontweight="bold", va="center", color=style.INK)
+        ax.set_title(a, fontsize=10.5)
+        ax.set_xlim(0, xs[-1] * 1.18)
+        ax.yaxis.set_major_formatter(fmt_money)
+        ax.tick_params(labelsize=8)
+    for ax in axes.ravel()[len(order):]:
+        ax.set_visible(False)
+    fig.suptitle(f"Predicted range over time (line = median; dark band = middle 50%; light band = 5th–95th; dashed = invested; "
+                 f"x axis = years)", fontweight="bold")
+    save(fig, "paths", "prediction_fans")
+
     cmap = plt.get_cmap("RdYlGn")
     fig, axes = plt.subplots(nrow, ncol, figsize=(4.2 * ncol, 3.0 * nrow), squeeze=False, constrained_layout=True)
     for ax, a in zip(axes.ravel(), order):

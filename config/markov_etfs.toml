@@ -1,0 +1,40 @@
+# Monte Carlo for the 19 ETFs from the Markov model run (the individual stocks there are left out).
+# Real tickers are used, so young funds (QQQM, AAAU, SGOV, ...) are simulated from their own short history.
+
+[report]
+title = "Monte Carlo: the Markov model ETFs"
+layout = "two_sections"     # 1. Bar diagrams, 2. Simulation prediction
+out = "results_markov_etfs" # kept separate from results/
+
+[investment]
+amount = 10000      # dollars invested today, in each fund
+monthly = 0         # dollars added at the start of every month (0 = lump sum only)
+years = 10          # how far ahead to simulate
+
+[simulation]
+paths = 10000       # simulated futures per fund
+block = 20          # trading days per resampled block (same 20-day window as the Markov model)
+seed = 42           # same seed = same result
+history_years = 20  # use up to this many years of each fund's own history
+haircut = 0.0325    # tougher case: points a year subtracted from every fund's return
+
+[etfs]
+VOO  = "US large-cap (S&P 500)"
+VTI  = "US total market"
+QQQM = "US tech-heavy (Nasdaq-100)"
+RSP  = "US equal-weight S&P 500"
+EQAL = "US equal-weight Russell 1000"
+VTV  = "US value"
+SCHD = "US dividend payers"
+VXUS = "International excluding the US"
+EWT  = "Taiwan"
+XLE  = "US energy"
+XLU  = "US utilities"
+AAAU = "Gold"
+HYG  = "US high-yield corporate bonds"
+TLT  = "US Treasuries, 20+ years"
+IEF  = "US Treasuries, 7-10 years"
+VGIT = "US Treasuries, 3-10 years"
+SCHP = "US inflation-protected Treasuries (TIPS)"
+SHY  = "US Treasuries, 1-3 years"
+SGOV = "US Treasury bills, 0-3 months (cash-like)"

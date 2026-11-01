@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
 import tomllib
 from pathlib import Path
@@ -49,7 +50,7 @@ def build_assets(cfg: dict, rets: dict[str, pd.Series], n_paths: int | None = No
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
-    ap.add_argument("--out", default="results")
+    ap.add_argument("--out", default=None, help="output folder (default: [report] out in the config, else results)")
     ap.add_argument("--paths", type=int, default=None, help="override the number of simulated futures")
     a = ap.parse_args()
     cfg = load_config(a.config)
@@ -59,12 +60,13 @@ def main() -> int:
     rets = returns_of(load_prices(tickers, cfg["simulation"]["history_years"]))
     assets = build_assets(cfg, rets)
     corr = correlation({t: rets[t] for t in cfg["etfs"] if t in rets})
-    out = Path(a.out)
+    out = Path(a.out or cfg.get("report", {}).get("out", "results"))
+    shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True, exist_ok=True)
     charts = make_all(cfg, assets, corr, out / "charts")
-    tables = write_tables(assets, corr, out / "tables")
+    tables = write_tables(assets, corr, out / "tables", cfg)
     (out / "RESULTS.md").write_text(render(cfg, assets, charts, tables))
-    print("mcsim ok:", len(assets), "funds/mixes,", cfg["simulation"]["paths"], "paths each")
+    print("mcsim ok:", out, "-", len(assets), "funds/mixes,", cfg["simulation"]["paths"], "paths each")
     return 0
 
 

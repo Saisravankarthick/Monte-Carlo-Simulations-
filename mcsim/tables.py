@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def write_tables(assets: dict, corr, outdir: Path) -> list[str]:
+def write_tables(assets: dict, corr, outdir: Path, cfg: dict) -> list[str]:
     import pandas as pd
 
     outdir.mkdir(parents=True, exist_ok=True)
@@ -25,6 +25,16 @@ def write_tables(assets: dict, corr, outdir: Path) -> list[str]:
     files = []
     p = outdir / "fund_summary.csv"
     pd.DataFrame(rows).sort_values("history_end_p50", ascending=False).to_csv(p, index=False)
+    files.append(p.relative_to(outdir.parent).as_posix())
+    from .report import predicted, prediction_points
+
+    pred = []
+    for name, a in assets.items():
+        for y in prediction_points(cfg):
+            q = predicted(a["sims"]["history"], y)
+            pred.append({"fund": name, "year": y, **{f"p{k}": round(v, 2) for k, v in q.items()}})
+    p = outdir / "prediction_by_year.csv"
+    pd.DataFrame(pred).to_csv(p, index=False)
     files.append(p.relative_to(outdir.parent).as_posix())
     if corr is not None:
         p = outdir / "correlation.csv"
