@@ -1,31 +1,31 @@
 # Data check: Yahoo Finance vs the Markov model repo
 
-Run 2026-11-01 01:44 UTC · prices are Yahoo Finance daily closes, dividend-adjusted (the same setting the Markov model and the simulation use).
+Run 2026-11-01 01:46 UTC · prices are Yahoo Finance daily closes, dividend-adjusted (the same setting the Markov model and the simulation use).
 
-**3 of 19 funds reproduce the Markov repo's report exactly** (same rows, regime now, long-run mix within 0.5 pts, buy-and-hold drawdown within 0.5 pts, Sharpe within 0.02).
+**19 of 19 funds reproduce the Markov repo's report exactly** (same rows, regime now, long-run mix within 0.5 pts, buy-and-hold drawdown within 0.5 pts, Sharpe within 0.02).
 
 ## A. Markov repo vs fresh Yahoo data (Markov's own 10-year window)
 
 | Fund | Rows: Markov / Yahoo | Window | Regime now: Markov / Yahoo | Max gap in long-run mix (pts) | Buy-and-hold worst fall: Markov / Yahoo | Sharpe: Markov / Yahoo | Result |
 |---|---|---|---|---|---|---|---|
-| VOO | 2514 / 2513 | 2016-10-31 → 2026-10-30 | Sideways / Sideways | 0.02 | -34.0% / -34.0% | 0.82 / 0.82 | ⚠ rows: 2514 vs 2513; start: 2016-10-31 vs 2016-11-01 |
-| VTI | 2514 / 2513 | 2016-10-31 → 2026-10-30 | Sideways / Sideways | 0.02 | -35.0% / -35.0% | 0.78 / 0.78 | ⚠ rows: 2514 vs 2513; start: 2016-10-31 vs 2016-11-01 |
+| VOO | 2514 / 2514 | 2016-10-31 → 2026-10-30 | Sideways / Sideways | 0.00 | -34.0% / -34.0% | 0.82 / 0.82 | ✅ match |
+| VTI | 2514 / 2514 | 2016-10-31 → 2026-10-30 | Sideways / Sideways | 0.00 | -35.0% / -35.0% | 0.78 / 0.78 | ✅ match |
 | QQQM | 1520 / 1520 | 2020-10-13 → 2026-10-30 | Bear / Bear | 0.00 | -35.0% / -35.0% | 0.69 / 0.69 | ✅ match |
-| RSP | 2514 / 2513 | 2016-10-31 → 2026-10-30 | Bull / Bull | 0.02 | -39.0% / -39.0% | 0.66 / 0.66 | ⚠ rows: 2514 vs 2513; start: 2016-10-31 vs 2016-11-01 |
-| EQAL | 2514 / 2513 | 2016-10-31 → 2026-10-30 | Bull / Bull | 0.02 | -40.4% / -40.4% | 0.57 / 0.58 | ⚠ rows: 2514 vs 2513; start: 2016-10-31 vs 2016-11-01 |
-| VTV | 2514 / 2513 | 2016-10-31 → 2026-10-30 | Bull / Bull | 0.02 | -36.8% / -36.8% | 0.75 / 0.75 | ⚠ rows: 2514 vs 2513; start: 2016-10-31 vs 2016-11-01 |
-| SCHD | 2514 / 2513 | 2016-10-31 → 2026-10-30 | Bull / Bull | 0.06 | -33.4% / -33.4% | 0.79 / 0.78 | ⚠ rows: 2514 vs 2513; start: 2016-10-31 vs 2016-11-01 |
-| VXUS | 2514 / 2513 | 2016-10-31 → 2026-10-30 | Bear / Bear | 0.02 | -36.0% / -36.0% | 0.50 / 0.50 | ⚠ rows: 2514 vs 2513; start: 2016-10-31 vs 2016-11-01 |
-| EWT | 2514 / 2513 | 2016-10-31 → 2026-10-30 | Bear / Bear | 0.03 | -38.9% / -38.9% | 0.82 / 0.82 | ⚠ rows: 2514 vs 2513; start: 2016-10-31 vs 2016-11-01 |
-| XLE | 2514 / 2513 | 2016-10-31 → 2026-10-30 | Bull / Bull | 0.02 | -66.8% / -66.8% | 0.55 / 0.55 | ⚠ rows: 2514 vs 2513; start: 2016-10-31 vs 2016-11-01 |
-| XLU | 2514 / 2513 | 2016-10-31 → 2026-10-30 | Bull / Bull | 0.03 | -36.1% / -36.1% | 0.52 / 0.51 | ⚠ rows: 2514 vs 2513; start: 2016-10-31 vs 2016-11-01 |
+| RSP | 2514 / 2514 | 2016-10-31 → 2026-10-30 | Bull / Bull | 0.00 | -39.0% / -39.0% | 0.66 / 0.66 | ✅ match |
+| EQAL | 2514 / 2514 | 2016-10-31 → 2026-10-30 | Bull / Bull | 0.00 | -40.4% / -40.4% | 0.57 / 0.57 | ✅ match |
+| VTV | 2514 / 2514 | 2016-10-31 → 2026-10-30 | Bull / Bull | 0.00 | -36.8% / -36.8% | 0.75 / 0.75 | ✅ match |
+| SCHD | 2514 / 2514 | 2016-10-31 → 2026-10-30 | Bull / Bull | 0.04 | -33.4% / -33.4% | 0.79 / 0.79 | ✅ match |
+| VXUS | 2514 / 2514 | 2016-10-31 → 2026-10-30 | Bear / Bear | 0.00 | -36.0% / -36.0% | 0.50 / 0.50 | ✅ match |
+| EWT | 2514 / 2514 | 2016-10-31 → 2026-10-30 | Bear / Bear | 0.00 | -38.9% / -38.9% | 0.82 / 0.82 | ✅ match |
+| XLE | 2514 / 2514 | 2016-10-31 → 2026-10-30 | Bull / Bull | 0.04 | -66.8% / -66.8% | 0.55 / 0.55 | ✅ match |
+| XLU | 2514 / 2514 | 2016-10-31 → 2026-10-30 | Bull / Bull | 0.04 | -36.1% / -36.1% | 0.52 / 0.52 | ✅ match |
 | AAAU | 2064 / 2064 | 2018-08-15 → 2026-10-30 | Bear / Bear | 0.00 | -28.1% / -28.1% | 0.81 / 0.81 | ✅ match |
-| HYG | 2514 / 2513 | 2016-10-31 → 2026-10-30 | Sideways / Sideways | 0.01 | -22.0% / -22.0% | 0.50 / 0.50 | ⚠ rows: 2514 vs 2513; start: 2016-10-31 vs 2016-11-01 |
-| TLT | 2514 / 2513 | 2016-10-31 → 2026-10-30 | Bull / Bull | 0.03 | -48.4% / -48.4% | -0.04 / -0.05 | ⚠ rows: 2514 vs 2513; start: 2016-10-31 vs 2016-11-01 |
-| IEF | 2514 / 2513 | 2016-10-31 → 2026-10-30 | Bull / Bull | 0.04 | -23.9% / -23.9% | 0.15 / 0.15 | ⚠ rows: 2514 vs 2513; start: 2016-10-31 vs 2016-11-01 |
-| VGIT | 2514 / 2513 | 2016-10-31 → 2026-10-30 | Bull / Bull | 0.04 | -16.1% / -16.1% | 0.33 / 0.32 | ⚠ rows: 2514 vs 2513; start: 2016-10-31 vs 2016-11-01 |
-| SCHP | 2514 / 2513 | 2016-10-31 → 2026-10-30 | Bull / Bull | 0.00 | -14.3% / -14.3% | 0.49 / 0.49 | ⚠ rows: 2514 vs 2513; start: 2016-10-31 vs 2016-11-01 |
-| SHY | 2514 / 2513 | 2016-10-31 → 2026-10-30 | Sideways / Sideways | 0.00 | -5.7% / -5.7% | 1.15 / 1.15 | ⚠ rows: 2514 vs 2513; start: 2016-10-31 vs 2016-11-01 |
+| HYG | 2514 / 2514 | 2016-10-31 → 2026-10-30 | Sideways / Sideways | 0.00 | -22.0% / -22.0% | 0.50 / 0.50 | ✅ match |
+| TLT | 2514 / 2514 | 2016-10-31 → 2026-10-30 | Bull / Bull | 0.00 | -48.4% / -48.4% | -0.04 / -0.04 | ✅ match |
+| IEF | 2514 / 2514 | 2016-10-31 → 2026-10-30 | Bull / Bull | 0.00 | -23.9% / -23.9% | 0.15 / 0.15 | ✅ match |
+| VGIT | 2514 / 2514 | 2016-10-31 → 2026-10-30 | Bull / Bull | 0.00 | -16.1% / -16.1% | 0.33 / 0.33 | ✅ match |
+| SCHP | 2514 / 2514 | 2016-10-31 → 2026-10-30 | Bull / Bull | 0.00 | -14.3% / -14.3% | 0.49 / 0.49 | ✅ match |
+| SHY | 2514 / 2514 | 2016-10-31 → 2026-10-30 | Sideways / Sideways | 0.00 | -5.7% / -5.7% | 1.15 / 1.15 | ✅ match |
 | SGOV | 1614 / 1614 | 2020-06-01 → 2026-10-30 | Sideways / Sideways | 0.00 | -0.0% / -0.0% | 14.79 / 14.79 | ✅ match |
 
 ## B. What the Monte Carlo used vs Yahoo (the simulation's own window)
@@ -59,16 +59,16 @@ The two windows differ, and for some funds the difference is large. Funds whose 
 | Fund | Years in simulation window | Growth a year, simulation window | Growth a year, Markov window | Worst fall, simulation window | Worst fall, Markov window |
 |---|---|---|---|---|---|
 | VOO | 10.0 | 15.5% | 15.5% | -34% | -34% |
-| VTI | 10.0 | 15.0% | 15.0% | -35% | -35% |
+| VTI | 10.0 | 15.0% | 14.9% | -35% | -35% |
 | QQQM | 6.0 | 15.9% | 15.9% | -35% | -35% |
-| RSP | 10.0 | 12.4% | 12.4% | -39% | -39% |
-| EQAL | 10.0 | 10.8% | 10.8% | -40% | -40% |
+| RSP | 10.0 | 12.4% | 12.3% | -39% | -39% |
+| EQAL | 10.0 | 10.8% | 10.7% | -40% | -40% |
 | VTV | 10.0 | 13.1% | 13.1% | -37% | -37% |
-| SCHD | 10.0 | 13.8% | 13.8% | -33% | -33% |
+| SCHD | 10.0 | 13.8% | 13.7% | -33% | -33% |
 | VXUS | 10.0 | 9.1% | 9.1% | -36% | -36% |
-| EWT | 10.0 | 18.5% | 18.5% | -39% | -39% |
+| EWT | 10.0 | 18.5% | 18.3% | -39% | -39% |
 | XLE | 10.0 | 11.9% | 11.9% | -67% | -67% |
-| XLU | 10.0 | 9.4% | 9.4% | -36% | -36% |
+| XLU | 10.0 | 9.4% | 9.2% | -36% | -36% |
 | AAAU | 8.2 | 15.5% | 15.5% | -28% | -28% |
 | HYG | 10.0 | 4.4% | 4.4% | -22% | -22% |
 | TLT | 10.0 | -1.8% | -1.8% | -48% | -48% |
