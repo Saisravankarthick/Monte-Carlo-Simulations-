@@ -1,137 +1,111 @@
-# Cash-flow Monte Carlo: results
+# ETF Monte Carlo research
 
-Updated 2026-11-01 01:09 UTC · **10,000 simulated futures** · seed 42 · blocks of 20 real trading days resampled from 2014-12-26 to 2026-10-30 (2,979 trading days)
+Updated 2026-11-01 01:22 UTC · **$10,000 today**, over **10 years** · 10,000 simulated futures per fund · blocks of 20 real trading days · seed 42
 
-> ⚠️ **Placeholder allocation.** The sleeve weights and glide path in this run are illustrative inputs that show how the model works. They are not a recommendation; the strategy's allocation is the team's own decision.
+> Research tool, not advice. Every future here is stitched together from each fund's own past, so it shows what the past implies, not what will happen.
 
-**Contents:** [At a glance](#at-a-glance) · [1. Inputs](#1-inputs) · [2. Simulated futures](#2-simulated-futures) · [3. Where it ends up](#3-where-the-portfolio-ends-up) · [4. Funding and contribution](#4-funding-reliability-and-the-facility-contribution) · [5. Risk](#5-risk) · [6. Limits](#6-limits) · [Files](#files)
+**Contents:** [At a glance](#at-a-glance) · [1. Outcomes](#1-outcomes) · [2. Risk and return](#2-risk-and-return) · [3. Simulated futures](#3-simulated-futures) · [4. Distributions](#4-distributions) · [5. Regimes](#5-regimes) · [6. Diversification](#6-diversification) · [7. The data used](#7-the-data-used) · [8. Limits](#8-limits) · [Files](#files)
 
 ## At a glance
 
-| Measure | history | stress |
-|---|---|---|
-| Median value on 1 Jan 2033 | **$592,135** | **$542,810** |
-| 5th – 95th percentile | $429,265 – $809,032 | $394,991 – $738,861 |
-| Chance of falling short of the reserve (earning 2%) | 9.6% | 18.9% |
-| Chance of falling short of the reserve (earning 3%) | 6.3% | 13.5% |
-| Chance of falling short of the reserve (earning 4%) | 4.3% | 9.8% |
-| Median facility contribution (reserve at 3%) | $152,829 | $103,504 |
-| Contribution with 90% confidence ≥ (reserve at 3%) | **$20,987** | **−$15,989** |
-| Chance of a fall worse than −20% in 2031–2032 | 1.2% | 1.7% |
+Ranked by median value after 10 years if history repeats. Total invested: $10,000.
 
-## 1. Inputs
+| # | Fund | What it is | Median value | 5th – 95th | Growth a year (median) | Chance of loss | Typical worst fall | Fall worse than −30% | Median if −3.25 pts a year | Today |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | **QQQ** | US tech-heavy (Nasdaq-100; same index as QQQM, longer history) | **$45,083** | $15,633 – $124,493 | 16.3% | 1% | -34% | 70% | $32,578 | Bear |
+| 2 | **VOO** | US large-cap (S&P 500) | **$40,345** | $18,008 – $84,383 | 15.0% | 0% | -28% | 37% | $29,155 | Sideways |
+| 3 | **SCHD** | US dividend payers | **$35,266** | $16,665 – $69,913 | 13.4% | 0% | -26% | 31% | $25,484 | Bull |
+| 4 | **EWT** | Taiwan | **$29,815** | $8,985 – $96,438 | 11.5% | 7% | -43% | 92% | $21,544 | Bear |
+| 5 | **US 60 / Intl 40** | Mix: VOO 60%, VXUS 40% | **$28,634** | $12,861 – $59,857 | 11.1% | 2% | -29% | 45% | $20,691 | Bear |
+| 6 | **VTI** | US total market | **$28,418** | $11,101 – $67,649 | 11.0% | 4% | -34% | 69% | $20,535 | Sideways |
+| 7 | **RSP** | US equal-weight S&P 500 | **$25,481** | $9,113 – $64,726 | 9.8% | 7% | -39% | 80% | $18,412 | Bull |
+| 8 | **EQAL** | US equal-weight Russell 1000 | **$25,219** | $9,358 – $61,058 | 9.7% | 6% | -36% | 69% | $18,223 | Bull |
+| 9 | **GLD** | Gold (same exposure as AAAU, longer history) | **$24,564** | $10,056 – $57,980 | 9.4% | 5% | -32% | 60% | $17,750 | Bear |
+| 10 | **VTV** | US value | **$24,112** | $9,768 – $55,138 | 9.2% | 5% | -35% | 70% | $17,423 | Bull |
+| 11 | **XLU** | US utilities | **$21,745** | $9,015 – $49,820 | 8.1% | 7% | -35% | 70% | $15,712 | Bull |
+| 12 | **XLE** | US energy | **$21,098** | $4,279 – $85,857 | 7.8% | 21% | -55% | 98% | $15,244 | Bull |
+| 13 | **VXUS** | International excluding the US | **$18,753** | $7,839 – $41,467 | 6.5% | 12% | -34% | 66% | $13,550 | Bear |
+| 14 | **HYG** | US high-yield corporate bonds | **$15,963** | $9,060 – $27,621 | 4.8% | 8% | -24% | 25% | $11,534 | Sideways |
+| 15 | **IEF** | US Treasuries, 7-10 years | **$13,444** | $9,594 – $19,019 | 3.0% | 8% | -14% | 1% | $9,714 | Bull |
+| 16 | **TLT** | US Treasuries, 20+ years | **$12,751** | $6,413 – $26,534 | 2.5% | 28% | -33% | 62% | $9,213 | Bull |
+| 17 | **SHY** | US Treasuries, 1-3 years (near cash) | **$12,038** | $11,172 – $13,002 | 1.9% | 0% | -2% | 0% | $8,698 | Sideways |
 
-| Item | Value |
-|---|---|
-| Contribution on 1 Jan 2027 | $300,000 |
-| Contribution on 1 Jan 2028 | $150,000 |
-| Valuation date | 1 Jan 2033 |
-| Operating payments | 10 × $50,000, at the start of each year (annuity-due) |
-| Flexibility amount held back | $0 |
+*Typical worst fall* = the median, across futures, of the largest peak-to-trough fall. *Today* = the regime from the last 20 trading days (Bull above +2%, Bear below −2%).
 
-| Sleeve | Holdings (weights inside the sleeve) |
-|---|---|
-| Growth | EQAL 50%, VXUS 50% |
-| Matching | IEF 100% |
-| Flex | SHY 100% |
+## 1. Outcomes
 
-![Glide path](charts/1_inputs/glide_path.png)
+![Outcome ranges by fund](charts/1_overview/outcome_ranges.png)
 
-![Sampled history by sleeve](charts/1_inputs/sleeve_history.png)
+![History vs stress](charts/1_overview/history_vs_stress.png)
 
-| Sleeve | Average return a year | Volatility a year | Worst fall |
-|---|---|---|---|
-| Growth | 9.7% | 17.0% | -38% |
-| Matching | 1.3% | 6.5% | -24% |
-| Flex | 1.6% | 1.5% | -6% |
+## 2. Risk and return
 
-## 2. Simulated futures
+Up and to the left is better: more growth for a smaller typical fall.
 
-Each line is one possible future for the portfolio, coloured by where it ends (red = low, green = high). The step in early 2028 is the second contribution.
+![Growth vs worst fall](charts/2_risk_return/growth_vs_worst_fall.png)
 
-![Simulated futures, history](charts/2_paths/paths_history.png)
+![Chance of loss](charts/2_risk_return/chance_of_loss.png)
 
-![Simulated futures, stress](charts/2_paths/paths_stress.png)
+![Chance of big falls](charts/2_risk_return/chance_of_big_falls.png)
 
-![Percentile fan, all scenarios](charts/2_paths/fan_all_scenarios.png)
+## 3. Simulated futures
 
-## 3. Where the portfolio ends up
+![Simulated futures](charts/3_paths/simulated_futures_all_funds.png)
 
-Bars are coloured against the reserve needed if it earns 3% ($439,305): red below it, amber up to 10% above it, green more than 10% above.
+## 4. Distributions
 
-![Value on the valuation date, history](charts/3_outcomes/value_2033_history.png)
+![Outcome distributions](charts/4_distributions/outcome_distributions.png)
 
-![Value on the valuation date, stress](charts/3_outcomes/value_2033_stress.png)
+## 5. Regimes
 
-| Scenario | Date | 5th | 25th | Median | 75th | 95th |
-|---|---|---|---|---|---|---|
-| history | 1 Jan 2031 | $413,958 | $486,967 | $546,930 | $612,595 | $717,043 |
-| history | 1 Jan 2033 | $429,265 | $519,218 | $592,135 | $674,667 | $809,032 |
-| stress | 1 Jan 2031 | $390,176 | $457,756 | $513,139 | $574,108 | $669,908 |
-| stress | 1 Jan 2033 | $394,991 | $476,419 | $542,810 | $616,960 | $738,861 |
+![Regime mix](charts/5_regimes/regime_mix.png)
 
-## 4. Funding reliability and the facility contribution
+## 6. Diversification
 
-Reserve = present value of the payments at the assumed reserve return (closed form). Contribution = portfolio value − reserve − flexibility amount.
+Low or negative correlation means two funds tend not to fall on the same days, which is what makes combining them useful.
 
-| Reserve earns | Reserve needed |
-|---|---|
-| 2% | $458,112 |
-| 3% | $439,305 |
-| 4% | $421,767 |
+![Correlation heatmap](charts/6_diversification/correlation_heatmap.png)
 
-For scale: the contributions add up to $450,000 even if they earn nothing.
+## 7. The data used
 
-![Chance of a shortfall](charts/4_funding/shortfall_by_reserve_rate.png)
+Each fund is simulated from its own history. Funds with short histories have seen fewer kinds of markets, so treat them with more caution.
 
-![Contribution with confidence levels](charts/4_funding/contribution_confidence.png)
-
-![Contribution ranges](charts/4_funding/contribution_ranges.png)
-
-| Scenario | Reserve earns | Funding ratio 10th / median | Chance below reserve | Contribution 10th / median / 90th | ≥ with 80% / 90% / 95% confidence |
+| Fund | History used | Years | Growth a year | Volatility | Worst fall |
 |---|---|---|---|---|---|
-| history | 2% | 1.00× / 1.29× | 9.62% | $2,180 / $134,023 / $296,216 | $44,743 / $2,180 / −$28,847 |
-| history | 3% | 1.05× / 1.35× | 6.35% | $20,987 / $152,829 / $315,022 | $63,549 / $20,987 / −$10,040 |
-| history | 4% | 1.09× / 1.40× | 4.28% | $38,526 / $170,368 / $332,561 | $81,088 / $38,526 / $7,499 |
-| stress | 2% | 0.92× / 1.18× | 18.87% | −$34,796 / $84,698 / $230,612 | $3,784 / −$34,796 / −$63,121 |
-| stress | 3% | 0.96× / 1.24× | 13.51% | −$15,989 / $103,504 / $249,419 | $22,590 / −$15,989 / −$44,315 |
-| stress | 4% | 1.00× / 1.29× | 9.76% | $1,550 / $121,043 / $266,957 | $40,129 / $1,550 / −$26,776 |
+| QQQ | 2006-11-02 to 2026-10-30 | 20.0 | 16.0% | 22.1% | -53% |
+| VOO | 2010-09-10 to 2026-10-30 | 16.1 | 14.7% | 16.9% | -34% |
+| SCHD | 2011-10-21 to 2026-10-30 | 15.0 | 13.8% | 15.3% | -33% |
+| EWT | 2006-11-02 to 2026-10-30 | 20.0 | 11.4% | 25.6% | -63% |
+| US 60 / Intl 40 | 2011-01-31 to 2026-10-30 | 15.7 | 11.0% | 16.7% | -34% |
+| VTI | 2006-11-02 to 2026-10-30 | 20.0 | 10.9% | 19.6% | -55% |
+| RSP | 2006-11-02 to 2026-10-30 | 20.0 | 9.9% | 20.7% | -60% |
+| EQAL | 2014-12-26 to 2026-10-30 | 11.8 | 9.3% | 18.3% | -40% |
+| GLD | 2006-11-02 to 2026-10-30 | 20.0 | 9.2% | 18.2% | -46% |
+| VTV | 2006-11-02 to 2026-10-30 | 20.0 | 9.3% | 19.3% | -59% |
+| XLU | 2006-11-02 to 2026-10-30 | 20.0 | 8.2% | 19.0% | -46% |
+| XLE | 2006-11-02 to 2026-10-30 | 20.0 | 7.9% | 30.0% | -71% |
+| VXUS | 2011-01-31 to 2026-10-30 | 15.7 | 6.4% | 17.7% | -36% |
+| HYG | 2007-04-12 to 2026-10-30 | 19.5 | 4.8% | 10.8% | -34% |
+| IEF | 2006-11-02 to 2026-10-30 | 20.0 | 3.1% | 6.9% | -24% |
+| TLT | 2006-11-02 to 2026-10-30 | 20.0 | 2.7% | 15.0% | -48% |
+| SHY | 2006-11-02 to 2026-10-30 | 20.0 | 1.9% | 1.5% | -6% |
 
-## 5. Risk
+## 8. Limits
 
-### Sequence risk: the largest fall during 2031–2032
-
-![Worst fall in the stress window](charts/5_risk/stress_window_drawdown.png)
-
-| Scenario | Median worst fall in the window | Worse than −20% | Worse than −30% | Median worst fall, whole period |
-|---|---|---|---|---|
-| history | -8% | 1.2% | 0.0% | -15% |
-| stress | -8% | 1.7% | 0.0% | -16% |
-
-### Regime days of the growth sleeve
-
-![Regime mix](charts/5_risk/regime_days.png)
-
-| Scenario | Bear days (5th – median – 95th) | Sideways days | Bull days |
-|---|---|---|---|
-| history | 229 – 323 – 424 | 498 – 584 – 672 | 471 – 584 – 698 |
-| stress | 252 – 349 – 454 | 515 – 601 – 688 | 431 – 540 – 653 |
-
-## 6. Limits
-
-- The sampled history is the only source of randomness. It is limited and spans particular market conditions, so a history-based scenario can flatter or penalise a sleeve.
-- Block resampling keeps co-movement and short-term clustering but nothing longer than one block.
-- The reserve return is a fixed assumption. Yields available when the reserve is bought are not simulated.
-- No taxes, trading costs or inflation. The payments are fixed in nominal terms.
-- Results are ranges under stated assumptions, not predictions.
+- The past is the only source of randomness. A decade dominated by one kind of market (for example falling rates, or a long US rally) shapes every simulated future.
+- Funds with different history lengths are compared side by side; the longer ones include crises the shorter ones never saw.
+- Blocks of 20 days keep short-term momentum and volatility clustering, but nothing longer than a block.
+- No taxes, fees beyond those already in the fund prices, currency effects beyond what is in the price, or inflation.
+- The stress case simply subtracts 3.25 points a year from every fund; it is a sensitivity check, not a forecast.
 
 ## Files
 
-Charts are sorted into one folder per category; the CSV tables hold every number shown above.
+Charts are sorted into one folder per category; the CSV tables hold every number above.
 
-- **1. Inputs:** [`glide_path.png`](charts/1_inputs/glide_path.png), [`sleeve_history.png`](charts/1_inputs/sleeve_history.png)
-- **2. Simulated futures:** [`paths_history.png`](charts/2_paths/paths_history.png), [`paths_stress.png`](charts/2_paths/paths_stress.png), [`fan_all_scenarios.png`](charts/2_paths/fan_all_scenarios.png)
-- **3. Outcomes:** [`value_2033_history.png`](charts/3_outcomes/value_2033_history.png), [`value_2033_stress.png`](charts/3_outcomes/value_2033_stress.png)
-- **4. Funding:** [`shortfall_by_reserve_rate.png`](charts/4_funding/shortfall_by_reserve_rate.png), [`contribution_confidence.png`](charts/4_funding/contribution_confidence.png), [`contribution_ranges.png`](charts/4_funding/contribution_ranges.png)
-- **5. Risk:** [`stress_window_drawdown.png`](charts/5_risk/stress_window_drawdown.png), [`regime_days.png`](charts/5_risk/regime_days.png)
-- **Tables:** [`portfolio_values.csv`](tables/portfolio_values.csv), [`funding_and_contribution.csv`](tables/funding_and_contribution.csv), [`risk.csv`](tables/risk.csv)
+- **1. Overview:** [`outcome_ranges.png`](charts/1_overview/outcome_ranges.png), [`history_vs_stress.png`](charts/1_overview/history_vs_stress.png)
+- **2. Risk and return:** [`growth_vs_worst_fall.png`](charts/2_risk_return/growth_vs_worst_fall.png), [`chance_of_loss.png`](charts/2_risk_return/chance_of_loss.png), [`chance_of_big_falls.png`](charts/2_risk_return/chance_of_big_falls.png)
+- **3. Simulated futures:** [`simulated_futures_all_funds.png`](charts/3_paths/simulated_futures_all_funds.png)
+- **4. Distributions:** [`outcome_distributions.png`](charts/4_distributions/outcome_distributions.png)
+- **5. Regimes:** [`regime_mix.png`](charts/5_regimes/regime_mix.png)
+- **6. Diversification:** [`correlation_heatmap.png`](charts/6_diversification/correlation_heatmap.png)
+- **Tables:** [`fund_summary.csv`](tables/fund_summary.csv), [`correlation.csv`](tables/correlation.csv)
