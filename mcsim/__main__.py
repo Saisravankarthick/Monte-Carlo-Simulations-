@@ -12,7 +12,9 @@ from pathlib import Path
 
 from .core import SLEEVES, adjust_returns, simulate
 from .data import history_summary, load_returns, sleeve_returns
-from .report import make_charts, render
+from .plots import make_all
+from .report import render
+from .tables import write_tables
 
 
 def load_config(path: str) -> dict:
@@ -51,8 +53,10 @@ def main() -> int:
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     n = a.paths or cfg["simulation"]["paths"]
-    (out / "RESULTS.md").write_text(render(cfg, history_summary(S), results, n, span))
-    make_charts(cfg, results, out)
+    hist = history_summary(S)
+    charts = make_all(cfg, hist, results, out / "charts")
+    tables = write_tables(cfg, results, out / "tables")
+    (out / "RESULTS.md").write_text(render(cfg, hist, results, n, span, charts, tables))
     print("mcsim ok:", tickers, n, "paths")
     return 0
 

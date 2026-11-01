@@ -28,6 +28,7 @@ jobs:
           CONFIG: ${{ inputs.config }}
           PATHS: ${{ inputs.paths }}
         run: |
+          rm -rf results
           args=(--config "$CONFIG" --out results)
           [ -n "$PATHS" ] && args+=(--paths "$PATHS")
           uv run python -m mcsim "${args[@]}" 2>&1 | grep -v "Warning\|^See https\|\.set_index\|\.sort_index\|\.rename\|\.drop" || true

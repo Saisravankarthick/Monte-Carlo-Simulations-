@@ -1,170 +1,149 @@
-"""Markdown report and charts from simulation results (AI-assisted code)."""
+"""RESULTS.md: a readable report with every chart embedded, organised by section (AI-assisted code)."""
 
 from __future__ import annotations
 
 import datetime as dt
-from pathlib import Path
 
 import numpy as np
 
-from .core import SLEEVES, TD, contribution_metrics, pct
-
-NAMES = ["Bear", "Sideways", "Bull"]
-
-
-def usd(x: float) -> str:
-    return f"${x:,.0f}" if x >= 0 else f"−${-x:,.0f}"
+from .core import SLEEVES, contribution_metrics, pv_annuity_due
+from .plots import central_rate
+from .style import usd
+from .tables import value_at_year
 
 
-def render(cfg: dict, hist, results: dict, n_paths: int, history_span: str) -> str:
+def _img(charts: dict, cat: str, contains: str, alt: str) -> list[str]:
+    hits = [p for p in charts.get(cat, []) if contains in p]
+    return [f"![{alt}]({hits[0]})", ""] if hits else []
+
+
+def render(cfg: dict, hist, results: dict, n_paths: int, history_span: str, charts: dict, tables: list[str]) -> str:
     case = cfg["case"]
-    start, end = case["start_year"], case["end_year"]
+    end = case["end_year"]
     rates = cfg["reserve"]["stress_rates"]
     flex = cfg["reserve"].get("flexibility_amount", 0.0)
     pmt, n_pay = cfg["reserve"]["payment"], cfg["reserve"]["n_payments"]
-    win = tuple(cfg["case"].get("stress_window", (2031, 2032)))
+    w0, w1 = tuple(case.get("stress_window", (2031, 2032)))
+    r0 = central_rate(rates)
+    names = list(results)
+    cms = {n: contribution_metrics(results[n]["sim"]["v_final"], pmt, n_pay, rates, flex) for n in names}
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    o = [f"# Cash-flow Monte Carlo: results", "",
-         f"Updated {now} · {n_paths:,} simulated futures · seed {cfg['simulation']['seed']} · "
-         f"blocks of {cfg['simulation']['block']} real days resampled from {history_span}", ""]
+
+    o = ["# Cash-flow Monte Carlo: results", "",
+         f"Updated {now} · **{n_paths:,} simulated futures** · seed {cfg['simulation']['seed']} · "
+         f"blocks of {cfg['simulation']['block']} real trading days resampled from {history_span}", ""]
     if cfg.get("placeholder"):
-        o += ["> **PLACEHOLDER ALLOCATION.** The sleeve weights and glide path in this run are illustrative inputs used to show how the model works. "
-              "They are not a recommendation. The strategy's allocation is the team's own decision.", ""]
-    o += ["## Inputs", "", "| Item | Value |", "|---|---|"]
+        o += ["> ⚠️ **Placeholder allocation.** The sleeve weights and glide path in this run are illustrative inputs that show how the model "
+              "works. They are not a recommendation; the strategy's allocation is the team's own decision.", ""]
+    o += ["**Contents:** [At a glance](#at-a-glance) · [1. Inputs](#1-inputs) · [2. Simulated futures](#2-simulated-futures) · "
+          f"[3. Where it ends up](#3-where-the-portfolio-ends-up) · [4. Funding and contribution](#4-funding-reliability-and-the-facility-contribution) · "
+          "[5. Risk](#5-risk) · [6. Limits](#6-limits) · [Files](#files)", ""]
+
+    # ------------------------------------------------------------------ at a glance
+    o += ["## At a glance", "", "| Measure | " + " | ".join(names) + " |", "|---|" + "---|" * len(names)]
+
+    def row(label, f):
+        o.append(f"| {label} | " + " | ".join(f(n) for n in names) + " |")
+
+    row(f"Median value on 1 Jan {end}", lambda n: f"**{usd(np.median(results[n]['sim']['v_final']))}**")
+    row("5th – 95th percentile", lambda n: f"{usd(np.percentile(results[n]['sim']['v_final'], 5))} – {usd(np.percentile(results[n]['sim']['v_final'], 95))}")
+    for r in rates:
+        row(f"Chance of falling short of the reserve (earning {r * 100:g}%)", lambda n, r=r: f"{cms[n][r]['shortfall'] * 100:.1f}%")
+    row(f"Median facility contribution (reserve at {r0 * 100:g}%)", lambda n: usd(cms[n][r0]["contrib_pcts"][50]))
+    row(f"Contribution with 90% confidence ≥ (reserve at {r0 * 100:g}%)", lambda n: f"**{usd(cms[n][r0]['lower_bounds'][0.9])}**")
+    row(f"Chance of a fall worse than −20% in {w0}–{w1}", lambda n: f"{(results[n]['sim']['dd_window'] < -0.20).mean() * 100:.1f}%")
+    o.append("")
+
+    # ------------------------------------------------------------------ 1 inputs
+    o += ["## 1. Inputs", "", "| Item | Value |", "|---|---|"]
     for y, a in cfg["contributions"].items():
         o.append(f"| Contribution on 1 Jan {y} | {usd(a)} |")
-    o += [f"| Valuation date | 1 Jan {end} |", f"| Operating payments | {n_pay} × {usd(pmt)} at the start of each year (annuity-due) |",
-          f"| Flexibility amount held back from the contribution | {usd(flex)} |", ""]
-    o += ["**Sleeves**", "", "| Sleeve | Holdings (weights inside the sleeve) |", "|---|---|"]
+    o += [f"| Valuation date | 1 Jan {end} |", f"| Operating payments | {n_pay} × {usd(pmt)}, at the start of each year (annuity-due) |",
+          f"| Flexibility amount held back | {usd(flex)} |", "", "| Sleeve | Holdings (weights inside the sleeve) |", "|---|---|"]
     for s in SLEEVES:
-        o.append(f"| {s} | " + ", ".join(f"{t} {w * 100:.0f}%" for t, w in cfg["sleeves"][s].items()) + " |")
-    o += ["", "**Glide path** (rebalanced to these weights on 1 January of each year)", "",
-          "| Year | Growth | Matching | Flex |", "|---|---|---|---|"]
-    for y, w in cfg["glide"].items():
-        o.append(f"| {y} | {w[0] * 100:.0f}% | {w[1] * 100:.0f}% | {w[2] * 100:.0f}% |")
-    o += ["", "**What the sampled history looked like** (annualised, before any scenario adjustment)", "",
-          "| Sleeve | Average return | Volatility | Worst fall |", "|---|---|---|---|"]
+        o.append(f"| {s.capitalize()} | " + ", ".join(f"{t} {w * 100:.0f}%" for t, w in cfg["sleeves"][s].items()) + " |")
+    o.append("")
+    o += _img(charts, "inputs", "glide_path", "Glide path")
+    o += _img(charts, "inputs", "sleeve_history", "Sampled history by sleeve")
+    o += ["| Sleeve | Average return a year | Volatility a year | Worst fall |", "|---|---|---|---|"]
     for s in SLEEVES:
         h = hist.loc[s]
-        o.append(f"| {s} | {h['mean'] * 100:.1f}% | {h['vol'] * 100:.1f}% | {h['worst_fall'] * 100:.0f}% |")
-    o += ["", "## Reserve needed on 1 Jan " + str(end) + " (closed form, no simulation)", "",
-          "| Reserve earns | Reserve needed for the payments |", "|---|---|"]
+        o.append(f"| {s.capitalize()} | {h['mean'] * 100:.1f}% | {h['vol'] * 100:.1f}% | {h['worst_fall'] * 100:.0f}% |")
+    o.append("")
+
+    # ------------------------------------------------------------------ 2 paths
+    o += ["## 2. Simulated futures", "",
+          "Each line is one possible future for the portfolio, coloured by where it ends (red = low, green = high). "
+          "The step in early 2028 is the second contribution.", ""]
+    for n in names:
+        o += _img(charts, "paths", f"paths_{n}", f"Simulated futures, {n}")
+    o += _img(charts, "paths", "fan_all", "Percentile fan, all scenarios")
+
+    # ------------------------------------------------------------------ 3 outcomes
+    o += ["## 3. Where the portfolio ends up", "",
+          f"Bars are coloured against the reserve needed if it earns {r0 * 100:g}% ({usd(pv_annuity_due(pmt, n_pay, r0))}): "
+          "red below it, amber up to 10% above it, green more than 10% above.", ""]
+    for n in names:
+        o += _img(charts, "outcomes", f"_{n}", f"Value on the valuation date, {n}")
+    o += ["| Scenario | Date | 5th | 25th | Median | 75th | 95th |", "|---|---|---|---|---|---|---|"]
+    for n in names:
+        for y in sorted({w0, end}):
+            v = value_at_year(results[n]["sim"], y)
+            if v is not None:
+                p = np.percentile(v, [5, 25, 50, 75, 95])
+                o.append(f"| {n} | 1 Jan {y} | " + " | ".join(usd(x) for x in p) + " |")
+    o.append("")
+
+    # ------------------------------------------------------------------ 4 funding
+    o += ["## 4. Funding reliability and the facility contribution", "",
+          "Reserve = present value of the payments at the assumed reserve return (closed form). "
+          "Contribution = portfolio value − reserve − flexibility amount.", "",
+          "| Reserve earns | Reserve needed |", "|---|---|"]
     for r in rates:
-        from .core import pv_annuity_due
         o.append(f"| {r * 100:g}% | {usd(pv_annuity_due(pmt, n_pay, r))} |")
-    zero = sum(a for a in cfg["contributions"].values())
-    o += ["", f"For scale: the contributions add up to {usd(zero)} even if they earn nothing.", ""]
+    o += ["", f"For scale: the contributions add up to {usd(sum(cfg['contributions'].values()))} even if they earn nothing.", ""]
+    o += _img(charts, "funding", "shortfall", "Chance of a shortfall")
+    o += _img(charts, "funding", "confidence", "Contribution with confidence levels")
+    o += _img(charts, "funding", "ranges", "Contribution ranges")
+    o += ["| Scenario | Reserve earns | Funding ratio 10th / median | Chance below reserve | Contribution 10th / median / 90th | ≥ with 80% / 90% / 95% confidence |",
+          "|---|---|---|---|---|---|"]
+    for n in names:
+        for r in rates:
+            m = cms[n][r]
+            lb = m["lower_bounds"]
+            o.append(f"| {n} | {r * 100:g}% | {m['ratio_pcts'][10]:.2f}× / {m['ratio_pcts'][50]:.2f}× | {m['shortfall'] * 100:.2f}% | "
+                     f"{usd(m['contrib_pcts'][10])} / {usd(m['contrib_pcts'][50])} / {usd(m['contrib_pcts'][90])} | "
+                     f"{usd(lb[0.8])} / {usd(lb[0.9])} / {usd(lb[0.95])} |")
+    o.append("")
 
-    names = list(results)
-    for name in names:
-        sim = results[name]["sim"]
-        sc = cfg["scenarios"][name]
-        v = sim["v_final"]
-        o += [f"## Scenario: {name}", ""]
-        desc = []
-        if sc.get("returns"):
-            desc.append("expected returns set to " + ", ".join(f"{k} {x * 100:g}%" for k, x in sc["returns"].items()))
-        else:
-            desc.append("historical average returns kept")
-        if sc.get("haircuts"):
-            desc.append("haircut of " + ", ".join(f"{k} −{x * 100:g} points a year" for k, x in sc["haircuts"].items()))
-        o += ["; ".join(desc).capitalize() + ".", "",
-              f"### Portfolio value", "",
-              "| Percentile | 1 Jan " + str(win[0]) + " | 1 Jan " + str(end) + " |", "|---|---|---|"]
-        idx_w0 = (win[0] - sim["start_year"]) * TD
-        col = int(np.where(sim["sample_idx"] == idx_w0)[0][0]) if idx_w0 in set(sim["sample_idx"]) else None
-        pv_w = pct(sim["values"][:, col]) if col is not None else None
-        pv_e = pct(v)
-        for p in (5, 25, 50, 75, 95):
-            o.append(f"| {p}th{' (median)' if p == 50 else ''} | {usd(pv_w[p]) if pv_w else '–'} | {usd(pv_e[p])} |")
-        cm = contribution_metrics(v, pmt, n_pay, rates, flex)
-        o += ["", "### Funding reliability and the facility contribution", "",
-              "Contribution = portfolio value − reserve − flexibility amount.", "",
-              "| If the reserve earns | Reserve | Funding ratio: 10th pct / median | Chance value < reserve | Contribution: 10th / median / 90th |",
-              "|---|---|---|---|---|"]
-        for r in rates:
-            m = cm[r]
-            o.append(f"| {r * 100:g}% | {usd(m['reserve'])} | {m['ratio_pcts'][10]:.2f}× / {m['ratio_pcts'][50]:.2f}× | "
-                     f"{m['shortfall'] * 100:.2f}% | {usd(m['contrib_pcts'][10])} / {usd(m['contrib_pcts'][50])} / {usd(m['contrib_pcts'][90])} |")
-        o += ["", "**A range you could state with a confidence level** (the contribution is at least this much, with the stated probability):", "",
-              "| If the reserve earns | 80% confident ≥ | 90% confident ≥ | 95% confident ≥ |", "|---|---|---|---|"]
-        for r in rates:
-            lb = cm[r]["lower_bounds"]
-            o.append(f"| {r * 100:g}% | {usd(lb[0.8])} | {usd(lb[0.9])} | {usd(lb[0.95])} |")
-        dd = sim["dd_window"]
-        big = dd < -0.30
-        r3 = rates[min(range(len(rates)), key=lambda i: abs(rates[i] - 0.03))]
-        R3 = cm[r3]["reserve"]
-        o += ["", f"### Sequence risk: a large fall in {win[0]}–{win[1]}", "",
-              f"| Measure | Value |", "|---|---|",
-              f"| Worst fall inside the window, median | {np.median(dd) * 100:.0f}% |",
-              f"| Chance of a fall worse than −20% in the window | {(dd < -0.20).mean() * 100:.1f}% |",
-              f"| Chance of a fall worse than −30% in the window | {big.mean() * 100:.1f}% |"]
-        if big.sum() >= 20:
-            o += [f"| Median value on 1 Jan {end} if that happens | {usd(np.median(v[big]))} |",
-                  f"| Median value on 1 Jan {end} otherwise | {usd(np.median(v[~big]))} |",
-                  f"| Chance value < reserve at {r3 * 100:g}% if that happens | {(v[big] < R3).mean() * 100:.2f}% |"]
-        else:
-            o.append("| (too few paths with such a fall to condition on) | – |")
-        reg = sim["regime"]
-        tot = reg.sum(axis=1)[0]
-        o += ["", "### Regime days of the growth sleeve (20-day return, ±2% rule)", "",
-              f"Out of {tot:,} labelled days, 5th – median – 95th percentile:", "",
-              "| Bear | Sideways | Bull |", "|---|---|---|",
-              "| " + " | ".join(" – ".join(f"{x:,.0f}" for x in np.percentile(reg[:, j], [5, 50, 95])) for j in range(3)) + " |", ""]
-    o += ["## Limits", "",
-          "- The sampled history is the only source of randomness. It is limited and includes a long bull market, so the history-based scenario flatters the growth sleeve.",
+    # ------------------------------------------------------------------ 5 risk
+    o += ["## 5. Risk", "", f"### Sequence risk: the largest fall during {w0}–{w1}", ""]
+    o += _img(charts, "risk", "stress_window", "Worst fall in the stress window")
+    o += ["| Scenario | Median worst fall in the window | Worse than −20% | Worse than −30% | Median worst fall, whole period |", "|---|---|---|---|---|"]
+    for n in names:
+        s = results[n]["sim"]
+        dd = s["dd_window"]
+        o.append(f"| {n} | {np.median(dd) * 100:.0f}% | {(dd < -0.20).mean() * 100:.1f}% | {(dd < -0.30).mean() * 100:.1f}% | {np.median(s['mdd']) * 100:.0f}% |")
+    o += ["", "### Regime days of the growth sleeve", ""]
+    o += _img(charts, "risk", "regime_days", "Regime mix")
+    o += ["| Scenario | Bear days (5th – median – 95th) | Sideways days | Bull days |", "|---|---|---|---|"]
+    for n in names:
+        reg = results[n]["sim"]["regime"]
+        o.append(f"| {n} | " + " | ".join(" – ".join(f"{x:,.0f}" for x in np.percentile(reg[:, j], [5, 50, 95])) for j in range(3)) + " |")
+    o.append("")
+
+    # ------------------------------------------------------------------ limits + files
+    o += ["## 6. Limits", "",
+          "- The sampled history is the only source of randomness. It is limited and spans particular market conditions, so a history-based scenario can flatter or penalise a sleeve.",
           "- Block resampling keeps co-movement and short-term clustering but nothing longer than one block.",
-          "- The reserve return is a fixed assumption here. In practice it depends on the yields available when the reserve is bought, which is a risk this model does not simulate.",
-          "- No taxes, trading costs, or inflation. The payments are fixed in nominal terms.",
-          "- Results are ranges under stated assumptions, not predictions.", ""]
+          "- The reserve return is a fixed assumption. Yields available when the reserve is bought are not simulated.",
+          "- No taxes, trading costs or inflation. The payments are fixed in nominal terms.",
+          "- Results are ranges under stated assumptions, not predictions.", "",
+          "## Files", "", "Charts are sorted into one folder per category; the CSV tables hold every number shown above.", ""]
+    labels = {"inputs": "1. Inputs", "paths": "2. Simulated futures", "outcomes": "3. Outcomes", "funding": "4. Funding", "risk": "5. Risk"}
+    for cat, files in charts.items():
+        if files:
+            o.append(f"- **{labels.get(cat, cat)}:** " + ", ".join(f"[`{f.split('/')[-1]}`]({f})" for f in files))
+    o.append("- **Tables:** " + ", ".join(f"[`{f.split('/')[-1]}`]({f})" for f in tables))
+    o.append("")
     return "\n".join(o)
-
-
-def make_charts(cfg: dict, results: dict, outdir: Path) -> None:
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    from .core import pv_annuity_due
-
-    outdir.mkdir(parents=True, exist_ok=True)
-    names = list(results)
-    rates = cfg["reserve"]["stress_rates"]
-    pmt, n_pay = cfg["reserve"]["payment"], cfg["reserve"]["n_payments"]
-    flex = cfg["reserve"].get("flexibility_amount", 0.0)
-    fig, axes = plt.subplots(1, len(names), figsize=(6 * len(names), 4.4), sharey=True, squeeze=False, constrained_layout=True)
-    for ax, name in zip(axes[0], names):
-        sim = results[name]["sim"]
-        x = sim["start_year"] + sim["sample_idx"] / TD
-        q = np.percentile(sim["values"], [5, 25, 50, 75, 95], axis=0)
-        ax.fill_between(x, q[0], q[4], color="#84BBA1", alpha=0.25, label="5th–95th percentile")
-        ax.fill_between(x, q[1], q[3], color="#84BBA1", alpha=0.45, label="25th–75th percentile")
-        ax.plot(x, q[2], color="#2E6F57", lw=2, label="Median")
-        for r, c in zip(rates, ["#C57F86", "#9A4750", "#5F2830"]):
-            ax.axhline(pv_annuity_due(pmt, n_pay, r), color=c, ls="--", lw=1.1, label=f"Reserve needed at {r * 100:g}%")
-        ax.set_title(name, fontweight="bold")
-        ax.set_xlabel("year")
-        ax.grid(alpha=0.25)
-        for s in ("top", "right"):
-            ax.spines[s].set_visible(False)
-    axes[0][0].set_ylabel("portfolio value")
-    axes[0][0].yaxis.set_major_formatter(lambda v, _: f"${v / 1000:,.0f}k")
-    axes[0][0].legend(frameon=False, fontsize=7.5, loc="upper left")
-    fig.savefig(outdir / "portfolio_fan.png", dpi=110, bbox_inches="tight")
-    plt.close(fig)
-
-    r3 = min(rates, key=lambda r: abs(r - 0.03))
-    fig, ax = plt.subplots(figsize=(8, 4), constrained_layout=True)
-    for name, color in zip(names, ["#2E6F57", "#9A4750", "#5F6673", "#C9A227"]):
-        c = results[name]["sim"]["v_final"] - pv_annuity_due(pmt, n_pay, r3) - flex
-        ax.hist(c, bins=80, histtype="step", density=True, lw=1.8, color=color, label=name)
-    ax.axvline(0, color="#444", ls=":", lw=1.2)
-    ax.set_xlabel(f"contribution capacity on 1 Jan {cfg['case']['end_year']} ($), reserve earning {r3 * 100:g}%")
-    ax.set_yticks([])
-    ax.legend(frameon=False)
-    for s in ("top", "right", "left"):
-        ax.spines[s].set_visible(False)
-    fig.savefig(outdir / "contribution_distribution.png", dpi=110, bbox_inches="tight")
-    plt.close(fig)

@@ -11,7 +11,7 @@ the team chooses. The example config is a **placeholder** that shows the mechani
 ## Run it
 
 On GitHub: **Actions → Run simulation → Run workflow**. It runs the tests, then the simulation, and commits
-`results/RESULTS.md` and two charts.
+the `results/` folder (report, charts, tables).
 
 Locally (needs internet for Yahoo Finance prices):
 
@@ -22,6 +22,27 @@ uv run --with pytest python -m pytest -q      # the correctness tests
 
 To use your own strategy, copy `config/example_placeholder.toml`, edit the sleeves, glide path and scenarios,
 and set `placeholder = false`.
+
+## What you get
+
+`results/RESULTS.md` is the report: an at-a-glance table, then every chart embedded under its section.
+Files are sorted by category:
+
+```
+results/
+├── RESULTS.md                      the report (open this first)
+├── charts/
+│   ├── 1_inputs/                   glide path (stacked bars), sampled history by sleeve (bars)
+│   ├── 2_paths/                    150 simulated futures per scenario (one colour each), percentile fans
+│   ├── 3_outcomes/                 histogram of the value on the valuation date, coloured against the reserve
+│   ├── 4_funding/                  shortfall chance (grouped bars), contribution at 80/90/95% confidence (bars),
+│   │                               contribution ranges (floating bars)
+│   └── 5_risk/                     worst fall in the stress window (histogram), regime mix (stacked bars)
+└── tables/                         the same numbers as CSV: portfolio_values, funding_and_contribution, risk
+```
+
+Code layout: `mcsim/core.py` (maths), `data.py` (prices), `plots.py` (charts), `tables.py` (CSV),
+`report.py` (RESULTS.md), `style.py` (colours); `config/` (inputs); `tests/` (checks).
 
 ## How it works, in plain words
 
@@ -51,11 +72,11 @@ and set `placeholder = false`.
 
 ## How it was checked
 
-`tests/test_core.py` (13 tests) checks answers that can be worked out by hand: the reserve at each rate matches the
+`tests/` (14 tests) checks answers that can be worked out by hand: the reserve at each rate matches the
 case study's table ($500,000 / $458,112 / $439,305 / $421,767 …); contributions grow to $450,000 at 0% and
 $562,094 at 4%; a simulation with no randomness equals the closed-form value; sleeve weighting; a built-in
 crash is detected in the right window; resampling keeps correlation and mean; the same seed reproduces the same
-result; invalid glide paths are rejected.
+result; invalid glide paths are rejected; every chart, table and link in the report is produced.
 
 ## AI-assistance disclosure
 
