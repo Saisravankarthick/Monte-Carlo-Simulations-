@@ -1,0 +1,3 @@
+scenario,window,worst_fall_median,chance_fall_worse_than_20pct,chance_fall_worse_than_30pct,max_drawdown_whole_period_median,bear_days_median_share,sideways_days_median_share,bull_days_median_share
+history,2031-2032,-0.0781,0.0119,0.0001,-0.1454,0.2163,0.3912,0.3912
+stress,2031-2032,-0.0823,0.0174,0.0003,-0.1582,0.2338,0.4025,0.3617
