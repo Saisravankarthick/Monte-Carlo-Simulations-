@@ -1,0 +1,57 @@
+# PLACEHOLDER INPUTS: these show how the model works. They are NOT a recommendation.
+# Copy this file, replace the sleeves, glide path and scenarios with the team's own choices,
+# and set placeholder = false.
+placeholder = true
+
+[case]
+start_year = 2027          # first contribution on 1 Jan 2027
+end_year = 2033            # valuation on 1 Jan 2033, when the reserve is set aside
+stress_window = [2031, 2032]   # the years checked for a large fall
+
+[contributions]            # from the case study: 1 January of each year
+2027 = 300000
+2028 = 150000
+
+[reserve]
+payment = 50000            # ten payments, the first on the valuation date
+n_payments = 10
+stress_rates = [0.02, 0.03, 0.04]   # return the reserve is assumed to earn
+flexibility_amount = 0     # dollars held back from the facility contribution
+
+# Each sleeve is a basket of tickers; the weights inside a sleeve must add to 1.
+# The tickers only supply the shape of daily returns (volatility, co-movement).
+# SGOV began in 2020, which would cut the usable history to about six years, so a longer-lived
+# short-duration Treasury fund stands in for the flexibility sleeve here.
+[sleeves.growth]
+EQAL = 0.5
+VXUS = 0.5
+[sleeves.matching]
+IEF = 1.0
+[sleeves.flex]
+SHY = 1.0
+
+# Target weights [growth, matching, flex] applied on 1 January of each year (annual rebalance).
+[glide]
+2027 = [0.60, 0.30, 0.10]
+2028 = [0.55, 0.35, 0.10]
+2029 = [0.50, 0.40, 0.10]
+2030 = [0.45, 0.45, 0.10]
+2031 = [0.40, 0.50, 0.10]
+2032 = [0.30, 0.55, 0.15]
+
+[simulation]
+paths = 10000
+block = 20                 # trading days per resampled block
+seed = 42
+history_years = 15
+
+# Scenarios. "returns" replaces a sleeve's historical average with a stated annual return;
+# "haircuts" subtracts points a year from a sleeve. Add the team's own, for example:
+#   [scenarios.assumed.returns]
+#   growth = 0.06
+#   matching = 0.04
+#   flex = 0.03
+[scenarios.history]
+
+[scenarios.stress]
+haircuts = { growth = 0.0325 }

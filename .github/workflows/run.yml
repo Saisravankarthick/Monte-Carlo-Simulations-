@@ -1,0 +1,44 @@
+name: Run simulation
+
+# Actions tab → "Run simulation" → Run workflow
+on:
+  workflow_dispatch:
+    inputs:
+      config:
+        description: "Config file"
+        default: "config/example_placeholder.toml"
+      paths:
+        description: "Number of simulated futures (blank = use the config)"
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Tests
+        run: uv run --with pytest python -m pytest -q
+      - name: Simulation
+        env:
+          CONFIG: ${{ inputs.config }}
+          PATHS: ${{ inputs.paths }}
+        run: |
+          args=(--config "$CONFIG" --out results)
+          [ -n "$PATHS" ] && args+=(--paths "$PATHS")
+          uv run python -m mcsim "${args[@]}" 2>&1 | grep -v "Warning\|^See https\|\.set_index\|\.sort_index\|\.rename\|\.drop" || true
+          cat results/RESULTS.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Commit results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results
+          if git diff --cached --quiet; then echo "No changes."; else
+            git commit -m "Update results"
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
