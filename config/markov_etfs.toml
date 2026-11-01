@@ -1,5 +1,6 @@
 # Monte Carlo for the 19 ETFs from the Markov model run (the individual stocks there are left out).
 # Real tickers are used, so young funds (QQQM, AAAU, SGOV, ...) are simulated from their own short history.
+# Data check: run Actions -> "Data audit" to compare these prices and the regime numbers with the Markov repo.
 
 [report]
 title = "Monte Carlo: the Markov model ETFs"
@@ -15,7 +16,8 @@ years = 10          # how far ahead to simulate
 paths = 10000       # simulated futures per fund
 block = 20          # trading days per resampled block (same 20-day window as the Markov model)
 seed = 42           # same seed = same result
-history_years = 20  # use up to this many years of each fund's own history
+history_years = 10  # same 10-year window as the Markov model repo, so every fund is judged on the same decade
+                    # (QQQM, AAAU and SGOV are younger than that and use all the history they have)
 haircut = 0.0325    # tougher case: points a year subtracted from every fund's return
 
 [etfs]

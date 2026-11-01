@@ -49,7 +49,8 @@ Code: `mcsim/core.py` (simulation maths), `data.py` (prices), `plots.py` (charts
 
 ## How it works
 
-1. **Prices.** Daily dividend-adjusted closes from Yahoo Finance, up to 20 years per fund (less if the fund is younger).
+1. **Prices.** Daily dividend-adjusted closes from Yahoo Finance, over `history_years` per fund (less if the fund is younger).
+   `config/etf_research.toml` uses 20 years; `config/markov_etfs.toml` uses 10, the same window as the Markov model repo.
 2. **Resampling.** Blocks of 20 real consecutive trading days are drawn at random from a fund's history and stitched
    into a future of the chosen length. Blocks keep short-term momentum and volatility clustering. Repeated
    10,000 times per fund. Mixes are built from their members' returns on shared dates, so co-movement is kept.
@@ -67,6 +68,14 @@ method from Bayesian statistics; the regime labels are a separate, simple descri
 - Funds with different history lengths are compared side by side; younger funds have seen fewer crises (flagged in the report).
 - Nothing longer than a 20-day block is carried over (for example, multi-year cycles).
 - No taxes, currency effects beyond what is in the price, or inflation.
+
+## Checking the data
+
+**Actions → Data audit → Run workflow** re-downloads the Yahoo prices and checks them against the Markov model
+repo's report (`data/markov_stats.json`, a copy of that repo's `report/stats.json`). It recomputes rows, regime now,
+long-run regime mix, buy-and-hold worst fall and Sharpe for every fund, checks the simulation's inputs against the
+same prices, and lists the biggest one-day moves and any gaps. The result is `data_check/DATA_CHECK.md`.
+Refresh `data/markov_stats.json` whenever the Markov repo's report is updated.
 
 ## How it was checked
 

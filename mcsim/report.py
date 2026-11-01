@@ -106,6 +106,8 @@ def render_two_sections(cfg: dict, assets: dict, charts: dict, tables: list[str]
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     plan = f"{usd(inv_cfg['amount'])} today" + (f" plus {usd(inv_cfg['monthly'])} every month" if inv_cfg.get("monthly") else "")
     short = [a for a in order if assets[a]["span"][2] < 8]
+    hy = sim_cfg["history_years"]
+    no_crash = int(min(assets[a]["span"][0] for a in order)[:4]) > 2009  # no fund's window reaches the 2008-09 crash
     o = [f"# {title}", "",
          f"Updated {now} · **{plan}** in each fund, over **{years} years** · {sim_cfg['paths']:,} simulated futures per fund · "
          f"blocks of {sim_cfg['block']} real trading days · seed {sim_cfg['seed']}", "",
@@ -114,6 +116,9 @@ def render_two_sections(cfg: dict, assets: dict, charts: dict, tables: list[str]
     if short:
         o += [f"> ⚠ Short history (under 8 years): {', '.join(short)}. These have not been through a full crash cycle, "
               "so their predictions are less reliable.", ""]
+    o += [f"> Window: every fund's last {hy} years of Yahoo Finance prices (dividend-adjusted), the same window as the Markov model, "
+          "so the funds are compared over the same decade." +
+          (" That decade does not include the 2008-09 crash, so falls and chances of loss are likely understated." if no_crash else ""), ""]
     o += ["**Contents:** [1. Bar diagrams](#1-bar-diagrams) · [2. Simulation prediction](#2-simulation-prediction) · "
           "[Notes](#notes)", "",
           "## 1. Bar diagrams", "",
@@ -150,7 +155,8 @@ def render_two_sections(cfg: dict, assets: dict, charts: dict, tables: list[str]
         h, sp = assets[a]["hist"], assets[a]["span"]
         flag = " ⚠ short" if sp[2] < 8 else ""
         o.append(f"| {a} | {sp[0]} to {sp[1]} | {sp[2]:.1f}{flag} | {h['cagr'] * 100:.1f}% | {h['vol'] * 100:.1f}% | {h['worst_fall'] * 100:.0f}% |")
-    o += ["", "- Funds with different history lengths are compared side by side; the longer ones include crises the shorter ones never saw.",
+    o += ["", f"- Every fund uses its last {hy} years; funds younger than that (⚠) use all they have and have seen less of the market.",
+          "- One decade is one sample. Strong years for a fund make its future look strong, and weak years the opposite.",
           "- No taxes, inflation or currency effects beyond what is in the fund prices.",
           f"- The tougher case simply subtracts {hc:g} points a year from every fund; it is a sensitivity check, not a forecast.", "",
           "**Files:** " + ", ".join(f"[`{f.split('/')[-1]}`]({f})" for fs in charts.values() for f in fs) + " · " +
