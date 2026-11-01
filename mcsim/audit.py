@@ -134,6 +134,8 @@ def main() -> int:
     summ = pd.read_csv(a.summary).set_index("fund")
     end = pd.Timestamp.now("UTC").tz_localize(None).normalize()
     start = end - pd.DateOffset(years=cfg["simulation"]["history_years"])
+    # reach back far enough to include the Markov repo's first row, whatever window the simulation used
+    start = min([start] + [pd.Timestamp(d["start"]) - pd.Timedelta(days=7) for d in md.values()])
 
     A, B, C, E, verdicts = [], [], [], [], {}
     for t in cfg["etfs"]:
