@@ -3,17 +3,24 @@
     uv run python -m mcsim.mh_etfs --config config/markov_etfs.toml --out results_mh_etfs
     uv run python -m mcsim.mh_audit --out results_mh_etfs
 
-Model, per fund. Daily log returns are independent draws from a skewed Student-t (Fernández-Steel):
-    r = mu + sigma * X,   X ~ skew-t(nu, gamma)
-    nu    : tail weight (small = fat tails, crashes more common than a bell curve allows)
-    gamma : skew (below 1 = bigger falls than rises)
-Parameters theta = (mu, log sigma, log(nu - 2), log gamma). Weak priors:
-    mu ~ N(0, 0.002^2)   log sigma ~ N(log 0.01, 1.5^2)   nu ~ Gamma(2, rate 0.1) on nu > 2   log gamma ~ N(0, 0.5^2)
-Metropolis-Hastings draws theta from its posterior (4 chains). From each draw:
-    growth a year     = exp(252 * mean daily log return) - 1
-    volatility a year = sqrt(252 * variance of daily log returns)
-Prediction: each simulated 10-year future first draws its own theta from the posterior, then 2,520 daily returns,
-so the range includes both market randomness and the uncertainty in the fund's true return and risk.
+Model, per fund: a GARCH(1, 1) with skewed Student-t shocks, for daily log returns r_t.
+    r_t = mu + s_t z_t                       z_t: skew-t(nu, gamma), rescaled to mean 0 and variance 1
+    s_t^2 = v (1 - p) + alpha e_{t-1}^2 + beta s_{t-1}^2,   p = alpha + beta < 1
+Today's volatility depends on recent days (calm and stormy spells); shocks have fat tails (nu) and can be
+lopsided (gamma below 1 = bigger falls than rises).
+  * Long-run variance v is set to the fund's actual variance (variance targeting), so the model's long-run
+    volatility is the fund's actual volatility; the chains learn how volatility moves around it.
+  * The average return mu is anchored to the fund's actual average: its likelihood is that of the sample mean,
+    whose spread is the sum of the GARCH daily variances / n^2. Inferring mu from the fitted shape instead lets a small
+    misfit in the crash tail move it by several points a year (found by the audit in an earlier version).
+  * The shape (p, alpha / p, nu, gamma) is fitted to the shocks e_t = r_t - mean(r).
+Parameters theta = (mu, logit p, logit a, log(nu - 2), log gamma), a = alpha / p. Weak priors:
+    mu ~ N(0, 0.002^2)   logit p ~ N(2.5, 2^2)   logit a ~ N(-2, 1.5^2)   nu ~ Gamma(2, rate 0.1) on nu > 2
+    log gamma ~ N(0, 0.5^2)
+Metropolis-Hastings draws theta from its posterior (4 Markov chains per fund). Growth a year = exp(252 mu) - 1.
+Prediction: each simulated 10-year future draws its own theta, starts from that theta's volatility on the last
+day of data and runs the GARCH forward, so the range includes market randomness, today's volatility and the
+uncertainty in the fund's true average return.
 """
 
 from __future__ import annotations
@@ -26,83 +33,132 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.signal import lfilter
+from scipy.special import expit, gammaln
 
 from . import style
 from .metropolis import correlated_walk, ess, gaussian_walk, r_hat, run_chains
 
 TD = 252
-PRIOR = {"mu_sd": 0.002, "log_sigma_mean": math.log(0.01), "log_sigma_sd": 1.5, "nu_rate": 0.1, "log_gamma_sd": 0.5}
-PARAMS = ["mu", "log_sigma", "log_nu_minus_2", "log_gamma"]
-_lgamma = np.vectorize(math.lgamma, otypes=[float])
+PRIOR = {"mu_sd": 0.002, "logit_p_mean": 2.5, "logit_p_sd": 2.0, "logit_a_mean": -2.0, "logit_a_sd": 1.5,
+         "nu_rate": 0.1, "log_gamma_sd": 0.5}
+PARAMS = ["mu", "logit_p", "logit_a", "log_nu_minus_2", "log_gamma"]
+NP = len(PARAMS)
 
 
 # ----------------------------------------------------------------------------- model
-def unpack(th):
-    th = np.atleast_2d(th)
+def unpack(th, v: float) -> dict:
+    """Named parameters; v is the fund's long-run daily variance (its actual variance)."""
+    th = np.atleast_2d(np.asarray(th, dtype=float))
     with np.errstate(over="ignore"):
-        return th[:, 0], np.exp(th[:, 1]), 2 + np.exp(th[:, 2]), np.exp(th[:, 3])
+        p, a = expit(th[:, 1]), expit(th[:, 2])
+        nu, g = 2 + np.exp(th[:, 3]), np.exp(th[:, 4])
+    vv = np.full(len(th), float(v))
+    return {"mu": th[:, 0], "v": vv, "p": p, "alpha": a * p, "beta": (1 - a) * p, "omega": vv * (1 - p), "nu": nu, "gamma": g}
+
+
+def skew_t_std(nu, g):
+    """Mean and standard deviation of the raw Fernández-Steel skew-t, used to rescale it to mean 0, variance 1."""
+    with np.errstate(over="ignore", invalid="ignore"):
+        m1 = 2 * np.sqrt(nu) * np.exp(gammaln((nu + 1) / 2) - gammaln(nu / 2)) / ((nu - 1) * np.sqrt(np.pi))
+        M = m1 * (g - 1 / g)
+        S = np.sqrt((nu / (nu - 2)) * (g ** 3 + g ** -3) / (g + 1 / g) - M ** 2)
+    return M, S
+
+
+def skew_t_cdf(x, nu, g):
+    """CDF of the raw Fernández-Steel skew-t (used by the audit's tail check)."""
+    from scipy.stats import t as student
+
+    x = np.asarray(x, dtype=float)
+    lo = 2 / (1 + g ** 2) * student.cdf(x * g, nu)
+    hi = 1 / (1 + g ** 2) + 2 * g ** 2 / (1 + g ** 2) * (student.cdf(x / g, nu) - 0.5)
+    return np.where(x < 0, lo, hi)
 
 
 def log_prior(th) -> np.ndarray:
     th = np.atleast_2d(th)
-    mu, ls, eta, lg = th.T
-    _, _, nu, _ = unpack(th)
-    with np.errstate(invalid="ignore", over="ignore"):  # impossible values give nan here and are rejected by the energy
-        return _prior_terms(mu, ls, eta, lg, nu)
+    with np.errstate(invalid="ignore", over="ignore"):  # impossible values give nan here and are rejected
+        nu = 2 + np.exp(th[:, 3])
+        return (-th[:, 0] ** 2 / (2 * PRIOR["mu_sd"] ** 2)
+                - (th[:, 1] - PRIOR["logit_p_mean"]) ** 2 / (2 * PRIOR["logit_p_sd"] ** 2)
+                - (th[:, 2] - PRIOR["logit_a_mean"]) ** 2 / (2 * PRIOR["logit_a_sd"] ** 2)
+                + np.log(nu) - PRIOR["nu_rate"] * nu + th[:, 3]  # Gamma(2, rate) on nu, times the Jacobian
+                - th[:, 4] ** 2 / (2 * PRIOR["log_gamma_sd"] ** 2))
 
 
-def _prior_terms(mu, ls, eta, lg, nu):
-    return (-mu ** 2 / (2 * PRIOR["mu_sd"] ** 2)
-            - (ls - PRIOR["log_sigma_mean"]) ** 2 / (2 * PRIOR["log_sigma_sd"] ** 2)
-            + np.log(nu) - PRIOR["nu_rate"] * nu + eta  # Gamma(2, rate) density on nu, times the Jacobian d nu / d eta
-            - lg ** 2 / (2 * PRIOR["log_gamma_sd"] ** 2))
+def cond_var(e: np.ndarray, q: dict, i: int) -> np.ndarray:
+    """Conditional variances s_1..s_{n+1}^2 from shocks e, for parameter row i (s_1^2 = long-run variance)."""
+    u = q["omega"][i] + q["alpha"][i] * e ** 2  # input for s_2^2 .. s_{n+1}^2
+    rest = lfilter([1.0], [1.0, -q["beta"][i]], u, zi=[q["beta"][i] * q["v"][i]])[0]
+    return np.concatenate([[q["v"][i]], rest])
 
 
 def log_lik(th, r: np.ndarray) -> np.ndarray:
-    """Skew-t log-likelihood of the daily log returns r, for each row of th."""
-    mu, sig, nu, g = unpack(th)
-    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
-        z = (r[None, :] - mu[:, None]) / sig[:, None]
-        w = np.where(z >= 0, z / g[:, None], z * g[:, None])
-        const = math.log(2) - np.log(g + 1 / g) + _lgamma((nu + 1) / 2) - _lgamma(nu / 2) - 0.5 * np.log(nu * np.pi) - np.log(sig)
-        return len(r) * const - ((nu + 1) / 2) * np.log1p(w ** 2 / nu[:, None]).sum(axis=1)
+    """Shock likelihood (GARCH skew-t) plus the likelihood of the sample mean given mu."""
+    r = np.asarray(r, dtype=float)
+    n, rbar = len(r), r.mean()
+    e = r - rbar
+    q = unpack(th, e.var())
+    M, S = skew_t_std(q["nu"], q["gamma"])
+    out = np.empty(len(q["mu"]))
+    for i in range(len(out)):
+        if not np.isfinite(S[i]):
+            out[i] = -np.inf
+            continue
+        h = cond_var(e, q, i)[:-1]
+        x = M[i] + S[i] * e / np.sqrt(h)  # back on the raw skew-t scale
+        g, nu = q["gamma"][i], q["nu"][i]
+        w = np.where(x >= 0, x / g, x * g)
+        shocks = (n * (math.log(2) - math.log(g + 1 / g) + gammaln((nu + 1) / 2) - gammaln(nu / 2)
+                       - 0.5 * math.log(nu * math.pi) + math.log(S[i]))
+                  - ((nu + 1) / 2) * np.log1p(w ** 2 / nu).sum() - 0.5 * np.log(h).sum())
+        var_mean = h.sum() / n ** 2  # variance of the sample mean under this volatility path
+        out[i] = shocks - 0.5 * (rbar - q["mu"][i]) ** 2 / var_mean - 0.5 * math.log(2 * math.pi * var_mean)
+    return out
 
 
 def make_energy(r: np.ndarray):
     r = np.asarray(r, dtype=float)
 
     def energy(th):
-        e = -(log_lik(th, r) + log_prior(th))
+        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+            e = -(log_lik(th, r) + log_prior(th))
         return np.where(np.isfinite(e), e, np.inf)
 
     return energy
 
 
-def abs_t_mean(nu):
-    """E|T| for a standard Student-t with nu degrees of freedom."""
-    return 2 * np.sqrt(nu) * np.exp(_lgamma((nu + 1) / 2) - _lgamma(nu / 2)) / ((nu - 1) * np.sqrt(np.pi))
-
-
-def moments(th) -> tuple[np.ndarray, np.ndarray]:
-    """Mean and variance of a daily log return under each parameter row."""
-    mu, sig, nu, g = unpack(th)
-    m1 = abs_t_mean(nu)
-    mean = mu + sig * m1 * (g - 1 / g)
-    ex2 = sig ** 2 * (nu / (nu - 2)) * (g ** 3 + g ** -3) / (g + 1 / g)
-    return mean, ex2 - (sig * m1 * (g - 1 / g)) ** 2
-
-
-def derived(th) -> dict:
-    mean, var = moments(th)
-    _, _, nu, g = unpack(th)
-    return {"growth": np.expm1(TD * mean), "vol": np.sqrt(TD * var), "nu": nu, "gamma": g, "mean": mean}
+def derived(th, v: float) -> dict:
+    q = unpack(th, v)
+    return {"growth": np.expm1(TD * q["mu"]), "vol": np.sqrt(TD * q["v"]), "nu": q["nu"], "gamma": q["gamma"],
+            "mean": q["mu"], "persistence": q["p"], "alpha": q["alpha"]}
 
 
 def sample_skew_t(rng, nu, g, size):
-    """Fernández-Steel skew-t draws: |T| scaled by gamma on the right, by 1/gamma on the left."""
+    """Raw Fernández-Steel skew-t draws: |T| scaled by gamma on the right, by 1/gamma on the left."""
     a = np.abs(rng.standard_t(nu, size=size))
     pos = rng.random(size) < g ** 2 / (1 + g ** 2)
     return np.where(pos, g * a, -a / g)
+
+
+def sample_z(rng, nu, g, size):
+    """Skew-t shocks rescaled to mean 0 and variance 1."""
+    M, S = skew_t_std(nu, g)
+    return (sample_skew_t(rng, nu, g, size) - M) / S
+
+
+def simulate_returns(th, n_days: int, rng, v: float) -> np.ndarray:
+    """One series of daily log returns from a single parameter row (made-up data for the audit and tests)."""
+    q = unpack(th, v)
+    mu, om, al, be = q["mu"][0], q["omega"][0], q["alpha"][0], q["beta"][0]
+    z = sample_z(rng, q["nu"][0], q["gamma"][0], n_days)
+    h, out = v, np.empty(n_days)
+    for t in range(n_days):
+        e = math.sqrt(h) * z[t]
+        out[t] = mu + e
+        h = om + al * e * e + be * h
+    return out
 
 
 # ----------------------------------------------------------------------------- fitting
@@ -112,38 +168,57 @@ def fit_fund(r: np.ndarray, seed: int = 0, steps: int = 20_000, pilot: int = 4_0
     rng = np.random.default_rng(seed)
     n, s = len(r), r.std()
     energy = make_energy(r)
-    base = np.array([np.median(r), math.log(0.75 * s), math.log(3.0), 0.0])
-    starts = base + rng.normal(0, [3 * s / math.sqrt(n), 0.1, 0.5, 0.1], size=(m, 4))
-    p = run_chains(energy, starts, pilot, gaussian_walk(np.array([s / math.sqrt(n), 0.7 / math.sqrt(n), 0.1, 0.02])), rng)
-    cov = np.cov(p["path"][pilot // 2:].reshape(-1, 4).T) * 2.38 ** 2 / 4 + np.eye(4) * 1e-14
+    base = np.array([r.mean(), math.log(0.95 / 0.05), math.log(0.1 / 0.9), math.log(4.0), 0.0])
+    starts = base + rng.normal(0, [2 * s / math.sqrt(n), 0.3, 0.3, 0.3, 0.05], size=(m, NP))
+    p = run_chains(energy, starts, pilot, gaussian_walk(np.array([s / math.sqrt(n), 0.1, 0.1, 0.1, 0.02])), rng)
+    cov = np.cov(p["path"][pilot // 2:].reshape(-1, NP).T) * 2.38 ** 2 / NP + np.eye(NP) * 1e-14
     main = run_chains(energy, p["x"], steps, correlated_walk(cov), rng)
-    draws = main["path"][burn + 1:]  # (steps - burn, m, 4)
-    d = derived(draws.reshape(-1, 4))
-    per_chain = {k: d[k].reshape(draws.shape[0], m) for k in ("growth", "vol")}
-    diag = {"rhat": max([r_hat(draws[..., j]) for j in range(4)] + [r_hat(v) for v in per_chain.values()]),
-            "ess": min([ess(draws[..., j]) for j in range(4)] + [ess(v) for v in per_chain.values()]),
+    draws = main["path"][burn + 1:]  # (steps - burn, m, NP)
+    d = derived(draws.reshape(-1, NP), r.var())
+    per_chain = {k: d[k].reshape(draws.shape[0], m) for k in ("growth", "persistence")}
+    diag = {"rhat": max(r_hat(draws[..., j]) for j in range(NP)),
+            "ess": min(ess(draws[..., j]) for j in range(NP)),
             "accept": float(main["accept"].mean())}
-    return {"draws": draws, "theta": draws.reshape(-1, 4), "derived": d, "diag": diag, "per_chain": per_chain}
+    return {"draws": draws, "theta": draws.reshape(-1, NP), "derived": d, "diag": diag, "per_chain": per_chain}
+
+
+def last_var(theta: np.ndarray, r: np.ndarray) -> np.ndarray:
+    """Each row's variance for the first day after the data (where the predictions start)."""
+    e = r - r.mean()
+    q = unpack(theta, e.var())
+    return np.array([cond_var(e, q, i)[-1] for i in range(len(theta))])
 
 
 # ----------------------------------------------------------------------------- prediction
-def predict(theta: np.ndarray, amount: float, years: int, n_paths: int, seed: int, chunk: int = 500) -> dict:
-    """Simulated values: each path draws one parameter row from theta, then its daily returns."""
+def predict(theta: np.ndarray, r: np.ndarray, amount: float, years: int, n_paths: int, seed: int, chunk: int = 2000) -> dict:
+    """Simulated values: each path draws one parameter row, starts from its last-day volatility and runs the GARCH."""
     rng = np.random.default_rng(seed)
     n_days = years * TD
     sample_idx = np.arange(0, n_days + 1, 21)
     values = np.empty((n_paths, len(sample_idx)))
     mdd = np.empty(n_paths)
     pick = rng.integers(0, len(theta), n_paths)
+    uniq, inv = np.unique(pick, return_inverse=True)
+    r = np.asarray(r, dtype=float)
+    h_start = last_var(theta[uniq], r)[inv]
     for s0 in range(0, n_paths, chunk):
         sl = slice(s0, min(s0 + chunk, n_paths))
-        mu, sig, nu, g = unpack(theta[pick[sl]])
-        x = sample_skew_t(rng, nu[:, None], g[:, None], (len(mu), n_days))
-        G = np.exp(np.cumsum(mu[:, None] + sig[:, None] * x, axis=1))
-        G = np.concatenate([np.ones((len(mu), 1)), G], axis=1)
-        values[sl] = amount * G[:, sample_idx]
-        mdd[sl] = (G / np.maximum.accumulate(G, axis=1) - 1).min(axis=1)
-    return {"values": values, "sample_idx": sample_idx, "end": values[:, -1], "mdd": mdd, "amount": amount}
+        q = unpack(theta[pick[sl]], np.var(r))
+        z = sample_z(rng, q["nu"][:, None], q["gamma"][:, None], (len(q["mu"]), n_days))
+        h, logG, peak, worst = h_start[sl].copy(), np.zeros(len(q["mu"])), np.zeros(len(q["mu"])), np.zeros(len(q["mu"]))
+        vals = [np.ones(len(q["mu"]))]
+        for t in range(n_days):
+            e = np.sqrt(h) * z[:, t]
+            logG += q["mu"] + e
+            h = q["omega"] + q["alpha"] * e * e + q["beta"] * h
+            peak = np.maximum(peak, logG)
+            worst = np.minimum(worst, logG - peak)
+            if (t + 1) % 21 == 0:
+                vals.append(np.exp(logG))
+        values[sl] = amount * np.stack(vals, axis=1)
+        mdd[sl] = np.expm1(worst)
+    return {"values": values, "sample_idx": sample_idx, "end": values[:, -1], "mdd": mdd, "amount": amount,
+            "vol_now": np.sqrt(TD * h_start)}
 
 
 def at_year(pred: dict, year: int) -> np.ndarray:
@@ -246,15 +321,16 @@ def main() -> int:
         r = np.log1p(R[f].dropna().to_numpy())
         fit = fit_fund(r, seed=a.seed + i, steps=a.steps)
         d = fit["derived"]
-        preds[f] = predict(fit["theta"], amount, years, a.paths, seed=a.seed + 100 + i)
-        fixed[f] = predict(np.median(fit["theta"], axis=0)[None, :], amount, years, a.paths, seed=a.seed + 200 + i)
+        preds[f] = predict(fit["theta"], r, amount, years, a.paths, seed=a.seed + 100 + i)
+        fixed[f] = predict(np.median(fit["theta"], axis=0)[None, :], r, amount, years, a.paths, seed=a.seed + 200 + i)
         fits[f] = fit
         idx = R[f].dropna().index
         rows.append({"fund": f, "description": cfg["etfs"][f], "start": str(idx[0].date()), "end": str(idx[-1].date()),
                      "days": len(r), "sample_growth": math.expm1(TD * r.mean()), "sample_vol": r.std(ddof=1) * math.sqrt(TD),
                      **{f"growth_p{q}": np.percentile(d["growth"], q) for q in (5, 50, 95)}, "growth_sd": d["growth"].std(),
-                     **{f"vol_p{q}": np.percentile(d["vol"], q) for q in (5, 50, 95)},
+                     **{f"vol_now_p{q}": np.percentile(preds[f]["vol_now"], q) for q in (5, 50, 95)},
                      "nu_p50": np.median(d["nu"]), "gamma_p50": np.median(d["gamma"]),
+                     "persistence_p50": np.median(d["persistence"]), "persistence_sd": d["persistence"].std(),
                      "p_growth_below_0": float((d["growth"] < 0).mean()),
                      **{f"{k}_p50": v for k, v in zip(PARAMS, np.median(fit["theta"], axis=0))},
                      "rhat_max": fit["diag"]["rhat"], "ess_min": fit["diag"]["ess"], "accept": fit["diag"]["accept"]})
@@ -276,10 +352,11 @@ def main() -> int:
     _hbar_interval(plt, by_g, cols, S.loc[by_g, "growth_p50"].to_numpy(), S.loc[by_g, "growth_p5"].to_numpy(),
                    S.loc[by_g, "growth_p95"].to_numpy(), S.loc[by_g, "sample_growth"].to_numpy(),
                    "Long-run growth a year: most likely value and 90% range", "Growth a year", out / "charts" / "growth_ranges.png")
-    by_v = list(S.sort_values("vol_p50", ascending=False).index)
-    _hbar_interval(plt, by_v, cols, S.loc[by_v, "vol_p50"].to_numpy(), S.loc[by_v, "vol_p5"].to_numpy(),
-                   S.loc[by_v, "vol_p95"].to_numpy(), S.loc[by_v, "sample_vol"].to_numpy(),
-                   "Volatility a year: most likely value and 90% range", "Volatility a year", out / "charts" / "volatility_ranges.png")
+    by_v = list(S.sort_values("sample_vol", ascending=False).index)
+    _hbar_interval(plt, by_v, cols, S.loc[by_v, "vol_now_p50"].to_numpy(), S.loc[by_v, "vol_now_p5"].to_numpy(),
+                   S.loc[by_v, "vol_now_p95"].to_numpy(), S.loc[by_v, "sample_vol"].to_numpy(),
+                   "Volatility today (bar, 90% range) vs the fund's long-run volatility (dot)", "Volatility a year",
+                   out / "charts" / "volatility_today.png")
     end = {f: P[(P.fund == f) & (P.year == years)].set_index("model") for f in funds}
     by_end = sorted(funds, key=lambda f: end[f].loc["uncertain", "p50"], reverse=True)
     chart_loss(plt, by_end, cols, [end[f].loc["fixed", "p_loss"] for f in by_end], [end[f].loc["uncertain", "p_loss"] for f in by_end],
@@ -301,10 +378,12 @@ def main() -> int:
           "",
           "The bootstrap report takes each fund's past decade as the truth. But ten years of noisy returns only pin down a fund's "
           "true long-run return roughly. Metropolis-Hastings measures how roughly: it draws thousands of plausible "
-          "(return, risk, tail, skew) combinations, each in proportion to how well it explains the actual daily returns. "
+          "combinations of return, risk, tails and skew, each in proportion to how well it explains the actual daily returns. "
           "Each simulated future then uses one of those combinations, so the predictions carry that uncertainty.", "",
-          "**Model:** daily log returns follow a skewed Student-t distribution, which allows fat tails (crashes) and bigger falls "
-          "than rises. Four Markov chains per fund; the proposal's shape is learned in a pilot run and then held fixed, so the "
+          "**Model:** a GARCH volatility model with skewed Student-t shocks. Today's volatility depends on recent days, so calm "
+          "and stormy spells are kept; shocks can have fat tails (crashes) and falls can be bigger than rises. The average return "
+          "is anchored to the fund's actual average, with its uncertainty set by the volatility; the long-run volatility is the "
+          "fund's actual volatility. Predictions start from each fund's volatility today. Four Markov chains per fund; the proposal's shape is learned in a pilot run and then held fixed, so the "
           "main chains keep the Markov property. Details: [`mcsim/mh_etfs.py`](../mcsim/mh_etfs.py).", "",
           "**Contents:** [1. Bar diagrams](#1-bar-diagrams) · [2. Simulation prediction](#2-simulation-prediction) · "
           "[3. Model estimates](#3-model-estimates) · [Notes](#notes)", "",
@@ -312,7 +391,9 @@ def main() -> int:
           "### 1a. Long-run growth a year", "",
           "Bar: most likely value. Whisker: 90% range. Dot: what the fund actually returned over the data window.", "",
           "![Growth ranges](charts/growth_ranges.png)", "",
-          "### 1b. Volatility a year", "", "![Volatility ranges](charts/volatility_ranges.png)", "",
+          "### 1b. Volatility today vs long-run", "",
+          "Bar beyond the dot: a stormier spell than usual, which the predictions start from and then fade at the fund's own pace.", "",
+          "![Volatility today](charts/volatility_today.png)", "",
           f"### 1c. Chance of losing money over {years} years", "",
           "Grey: if each fund's return and risk were known exactly. Colour: including uncertainty about them.", "",
           "![Chance of loss](charts/chance_of_loss.png)", "",
@@ -329,18 +410,20 @@ def main() -> int:
           "which resamples real 20-day blocks instead of fitting a model.", "",
           "### 2b. Predicted range over time", "", "![Prediction fans](charts/prediction_fans.png)", "",
           "## 3. Model estimates", "",
-          "| Fund | Data | Growth a year: actual | Growth a year: model (90% range) | Chance true growth is below 0 | Volatility: actual | Volatility: model (90% range) | Tails ν | Skew γ |",
-          "|---|---|---|---|---|---|---|---|---|"]
+          "| Fund | Data | Growth a year: actual | Growth a year: model (90% range) | Chance true growth is below 0 | Volatility: long-run | Volatility today (90% range) | Calm/stormy persistence | Tails ν | Skew γ |",
+          "|---|---|---|---|---|---|---|---|---|---|"]
     for f in by_g:
         s = S.loc[f]
         o.append(f"| {f} | {s['start']} to {s['end']} ({s['days'] / TD:.1f} y) | {pct(s['sample_growth'])} | **{pct(s['growth_p50'])}** "
                  f"({pct(s['growth_p5'])} to {pct(s['growth_p95'])}) | {pct(s['p_growth_below_0'], 0)} | {pct(s['sample_vol'])} | "
-                 f"{pct(s['vol_p50'])} ({pct(s['vol_p5'])} to {pct(s['vol_p95'])}) | {s['nu_p50']:.1f} | {s['gamma_p50']:.2f} |")
-    o += ["", "*Tails ν*: below about 5 means crashes and spikes are far more common than a bell curve allows. "
+                 f"{pct(s['vol_now_p50'])} ({pct(s['vol_now_p5'])} to {pct(s['vol_now_p95'])}) | {s['persistence_p50']:.3f} | "
+                 f"{s['nu_p50']:.1f} | {s['gamma_p50']:.2f} |")
+    o += ["", "*Volatility today*: the model's estimate for the day after the data ends; above the long-run figure means a stormy spell. "
+          "*Persistence*: how slowly a calm or stormy spell fades (0.99 = very slowly). "
+          "*Tails ν*: below about 5 means crashes and spikes are far more common than a bell curve allows. "
           "*Skew γ*: below 1 means falls tend to be larger than rises.", "",
           "## Notes", "",
-          "- Days are treated as independent. Real markets have calm and stormy spells; the bootstrap report keeps those, this model does not. "
-          "The audit checks how much that matters for the return estimates.",
+          "- Volatility follows a GARCH(1, 1); the average return is taken as constant (no momentum or mean reversion in returns).",
           "- The ranges describe uncertainty given this decade. They cannot include risks the decade never showed.",
           "- No taxes, inflation or currency effects beyond what is in the fund prices.", "",
           "**Files:** " + ", ".join(f"[`{p.name}`](charts/{p.name})" for p in sorted((out / 'charts').glob('*.png'))) + " · " +
