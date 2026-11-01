@@ -3,59 +3,63 @@
 import numpy as np
 import pytest
 
-from mcsim.core import (SLEEVES, adjust_returns, block_bootstrap, contribution_metrics, fv_contributions,
-                        pv_annuity_due, simulate)
-
-START, END = 2027, 2033
-CONTRIBS = {2027: 300_000.0, 2028: 150_000.0}
-GLIDE = {y: [0.5, 0.3, 0.2] for y in range(START, END)}
+from mcsim.core import MONTH, TD, block_bootstrap, fv_lump_and_monthly, history_stats, simulate_asset, summarise
 
 
-def constant_returns(annual: float, T: int = 600) -> np.ndarray:
-    d = (1 + annual) ** (1 / 252) - 1
-    return np.full((T, 3), d)
+def constant(annual: float, T: int = 600) -> np.ndarray:
+    return np.full(T, (1 + annual) ** (1 / TD) - 1)
 
 
-def test_pv_annuity_due_matches_the_case_study_table():
-    # Study pack section 3.1 table
-    expected = {0.0: 500_000, 0.02: 458_112, 0.03: 439_305, 0.04: 421_767, 0.05: 405_391, 0.06: 390_085}
-    for r, v in expected.items():
-        assert pv_annuity_due(50_000, 10, r) == pytest.approx(v, abs=1)
+@pytest.mark.parametrize("g", [0.0, 0.05, 0.10])
+def test_lump_sum_with_no_randomness_equals_compound_growth(g):
+    sim = simulate_asset(constant(g), 10_000, 0, 10, n_paths=20, block=20, seed=1)
+    assert sim["end"] == pytest.approx(10_000 * (1 + g) ** 10, rel=1e-9)
+    assert sim["growth"] == pytest.approx(g, abs=1e-12)
+    assert sim["mdd"].max() == pytest.approx(0, abs=1e-12)
 
 
-def test_contributions_without_growth_are_450k():
-    assert fv_contributions(CONTRIBS, 0.0, END) == 450_000
-    # Study pack section 3.2: 4% gives $562,094
-    assert fv_contributions(CONTRIBS, 0.04, END) == pytest.approx(562_094, abs=1)
+@pytest.mark.parametrize("g", [0.0, 0.07])
+def test_monthly_contributions_match_the_closed_form(g):
+    sim = simulate_asset(constant(g), 5_000, 200, 3, n_paths=10, block=20, seed=1)
+    assert sim["end"] == pytest.approx(fv_lump_and_monthly(5_000, 200, g, 3), rel=1e-9)
+    n_months = (3 * TD - 1) // MONTH
+    assert sim["invested"] == 5_000 + 200 * n_months
 
 
-@pytest.mark.parametrize("g", [0.0, 0.04, 0.07])
-def test_simulation_with_no_randomness_equals_closed_form(g):
-    sim = simulate(constant_returns(g), CONTRIBS, GLIDE, START, END, n_paths=50, block=20, seed=1)
-    assert sim["v_final"] == pytest.approx(fv_contributions(CONTRIBS, g, END), rel=1e-9)
-    assert sim["values"][:, 0] == pytest.approx(300_000)  # value right after the first contribution
-    assert sim["mdd"].max() == pytest.approx(0, abs=1e-12)  # a steadily rising path has no fall
+def test_haircut_lowers_growth_by_roughly_that_amount():
+    base = simulate_asset(constant(0.08), 1, 0, 5, 10, 20, 1)["growth"][0]
+    cut = simulate_asset(constant(0.08), 1, 0, 5, 10, 20, 1, haircut=0.03)["growth"][0]
+    assert base - cut == pytest.approx(0.03, abs=0.005)   # subtracted from daily returns, so close to 3 points
 
 
-def test_sleeves_with_different_returns_are_weighted_by_the_glide_path():
-    # one year only: weights 0.5 / 0.3 / 0.2, sleeves earning 10%, 5%, 0%
-    d = np.array([1.10, 1.05, 1.00]) ** (1 / 252) - 1
-    S = np.tile(d, (400, 1))
-    sim = simulate(S, {2027: 100_000.0}, {2027: [0.5, 0.3, 0.2]}, 2027, 2028, n_paths=10, block=20, seed=1)
-    assert sim["v_final"][0] == pytest.approx(100_000 * (0.5 * 1.10 + 0.3 * 1.05 + 0.2 * 1.00), rel=1e-9)
+def test_known_crash_is_caught():
+    n = 5 * TD
+    r = np.zeros(n + 1)
+    r[300] = -0.40
+    sim = simulate_asset(r, 1_000, 0, 5, n_paths=5, block=n, seed=0)   # one block = whole path keeps the order
+    assert sim["mdd"].min() == pytest.approx(-0.40, abs=1e-12)
+    s = summarise(sim)
+    assert s["p_fall_30"] == 1.0 and s["p_fall_40"] == 0.0   # exactly -40% is not "worse than -40%"
+    assert s["p_loss"] == 1.0
 
 
-def test_same_seed_gives_same_result_and_different_seed_differs():
+def test_regime_counts_follow_the_rule():
+    # steady +0.2% a day: every 20-day return is about +4%, so every labelled day is Bull
+    sim = simulate_asset(np.full(600, 0.002), 1, 0, 2, 5, 20, 1)
+    assert (sim["regime"][:, 2] == sim["regime"].sum(axis=1)).all()
+    assert history_stats(np.full(600, -0.002))["regime_now"] == "Bear"
+
+
+def test_same_seed_same_result():
     rng = np.random.default_rng(0)
-    S = rng.normal(0.0004, 0.01, (800, 3))
-    a = simulate(S, CONTRIBS, GLIDE, START, END, 200, 20, seed=5)["v_final"]
-    b = simulate(S, CONTRIBS, GLIDE, START, END, 200, 20, seed=5)["v_final"]
-    c = simulate(S, CONTRIBS, GLIDE, START, END, 200, 20, seed=6)["v_final"]
-    assert np.array_equal(a, b)
-    assert not np.array_equal(a, c)
+    r = rng.normal(0.0004, 0.01, 1500)
+    a = simulate_asset(r, 1, 0, 5, 300, 20, 9)["end"]
+    b = simulate_asset(r, 1, 0, 5, 300, 20, 9)["end"]
+    c = simulate_asset(r, 1, 0, 5, 300, 20, 10)["end"]
+    assert np.array_equal(a, b) and not np.array_equal(a, c)
 
 
-def test_bootstrap_keeps_correlation_and_mean():
+def test_bootstrap_keeps_mean_and_cross_correlation():
     rng = np.random.default_rng(3)
     common = rng.normal(0, 0.01, 3000)
     R = np.column_stack([common + rng.normal(0.0004, 0.004, 3000), 0.8 * common + rng.normal(0.0002, 0.005, 3000)])
@@ -64,45 +68,10 @@ def test_bootstrap_keeps_correlation_and_mean():
     assert sample.mean(axis=0) == pytest.approx(R.mean(axis=0), abs=2e-4)
 
 
-def test_adjust_returns_moves_the_average_and_applies_haircuts():
-    rng = np.random.default_rng(2)
-    S = rng.normal(0.0005, 0.01, (500, 3))
-    A = adjust_returns(S, expected={"growth": 0.06}, haircuts={"matching": 0.02})
-    assert A[:, 0].mean() * 252 == pytest.approx(0.06)
-    assert (A[:, 1].mean() - S[:, 1].mean()) * 252 == pytest.approx(-0.02)
-    assert np.array_equal(A[:, 2], S[:, 2])
-    assert A[:, 0].std() == pytest.approx(S[:, 0].std())  # shape kept, only the centre moves
-
-
-def test_drawdown_window_catches_a_crash():
-    # flat, then one -40% day inside 2031, then flat. All sleeves identical so weights don't matter.
-    sim_days = (END - START) * 252
-    # one block as long as the whole path keeps the order; one spare day lets the bootstrap start at day 0 or 1,
-    # and in both cases the crash day still falls inside 2031
-    S = np.zeros((sim_days + 1, 3))
-    S[4 * 252 + 100, :] = -0.40
-    out = simulate(S, CONTRIBS, GLIDE, START, END, n_paths=5, block=sim_days, seed=0, window_years=(2031, 2032))
-    assert out["dd_window"].min() == pytest.approx(-0.40, abs=1e-9)
-    assert out["mdd"].min() == pytest.approx(-0.40, abs=1e-9)
-
-
-def test_funding_metrics_are_consistent():
-    v = np.array([400_000.0, 439_400.0, 500_000.0, 600_000.0])
-    m = contribution_metrics(v, 50_000, 10, [0.03], flex_amount=10_000)[0.03]
-    assert m["reserve"] == pytest.approx(439_305, abs=1)
-    assert m["shortfall"] == pytest.approx(0.25)  # only 400,000 is below the reserve of about 439,305
-    assert m["contrib_pcts"][50] == pytest.approx(np.median(v) - 439_305.0 - 10_000, abs=1)
-
-
-def test_glide_weights_are_validated():
-    bad = dict(GLIDE)
-    bad[2030] = [0.5, 0.3, 0.3]
-    with pytest.raises(ValueError):
-        simulate(constant_returns(0.04), CONTRIBS, bad, START, END, 5, 20, 1)
-    missing = {y: w for y, w in GLIDE.items() if y != 2029}
-    with pytest.raises(ValueError):
-        simulate(constant_returns(0.04), CONTRIBS, missing, START, END, 5, 20, 1)
-
-
-def test_sleeve_order_constant():
-    assert SLEEVES == ("growth", "matching", "flex")
+def test_summary_probabilities_are_consistent():
+    rng = np.random.default_rng(4)
+    s = summarise(simulate_asset(rng.normal(0.0003, 0.012, 2000), 10_000, 0, 10, 2000, 20, 2))
+    p = s["end_pcts"]
+    assert p[5] <= p[25] <= p[50] <= p[75] <= p[95]
+    assert 0 <= s["p_fall_40"] <= s["p_fall_30"] <= s["p_fall_20"] <= 1
+    assert sum(s["regime_share"]) == pytest.approx(1, abs=0.02)

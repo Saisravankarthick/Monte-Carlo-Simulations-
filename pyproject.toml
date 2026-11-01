@@ -1,7 +1,7 @@
 [project]
 name = "mcsim"
 version = "0.1.0"
-description = "Cash-flow Monte Carlo for a liability-driven portfolio"
+description = "Monte Carlo research tool for comparing ETFs"
 requires-python = ">=3.11"
 dependencies = ["numpy", "pandas", "yfinance", "matplotlib"]
 

@@ -6,7 +6,7 @@ on:
     inputs:
       config:
         description: "Config file"
-        default: "config/example_placeholder.toml"
+        default: "config/etf_research.toml"
       paths:
         description: "Number of simulated futures (blank = use the config)"
         default: ""

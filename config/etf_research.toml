@@ -1,0 +1,39 @@
+# ETF market research: edit these inputs freely.
+
+[investment]
+amount = 10000      # dollars invested today
+monthly = 0         # dollars added at the start of every month (0 = lump sum only)
+years = 10          # how far ahead to simulate
+
+[simulation]
+paths = 10000       # simulated futures per fund
+block = 20          # trading days per resampled block
+seed = 42           # same seed = same result
+history_years = 20  # use up to this many years of each fund's own history
+haircut = 0.0325    # stress case: points a year subtracted from every fund's return
+
+# Funds to compare: ticker = "description".
+# Where a fund is very young, a fund tracking the same thing with a longer history is used
+# so the simulation has more market conditions to draw from (noted in the description).
+[etfs]
+VOO  = "US large-cap (S&P 500)"
+VTI  = "US total market"
+QQQ  = "US tech-heavy (Nasdaq-100; same index as QQQM, longer history)"
+RSP  = "US equal-weight S&P 500"
+EQAL = "US equal-weight Russell 1000"
+VTV  = "US value"
+SCHD = "US dividend payers"
+VXUS = "International excluding the US"
+EWT  = "Taiwan"
+XLE  = "US energy"
+XLU  = "US utilities"
+GLD  = "Gold (same exposure as AAAU, longer history)"
+IEF  = "US Treasuries, 7-10 years"
+TLT  = "US Treasuries, 20+ years"
+HYG  = "US high-yield corporate bonds"
+SHY  = "US Treasuries, 1-3 years (near cash)"
+
+# Optional fixed-weight mixes, simulated on the dates all members have data.
+[mixes."US 60 / Intl 40"]
+VOO = 0.6
+VXUS = 0.4

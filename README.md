@@ -1,86 +1,81 @@
-# Cash-flow Monte Carlo for a liability-driven portfolio
+# ETF Monte Carlo research
 
-Code and analysis only. It estimates how much a portfolio could be worth on 1 January 2033 given dated
-contributions (1 Jan 2027 and 1 Jan 2028), and compares that with the reserve needed to pay ten annual
-payments (annuity-due). It reports a funding ratio, the chance of a shortfall, a range for what is left
-over for a contribution (with confidence levels), and what happens if there is a large fall in 2031–2032.
+A research tool for comparing markets through their ETFs. For each fund it simulates thousands of possible
+futures for an investment (a lump sum today, optionally plus a fixed amount every month) and compares the funds on:
 
-**The written strategy and IPS are not in this repository.** The sleeve weights and glide path are inputs
-the team chooses. The example config is a **placeholder** that shows the mechanics; it is not a recommendation.
+- **where the money could end up** (median and 5th–95th percentile range)
+- **growth a year**, and how much it varies
+- **chance of losing money** over the horizon
+- **how deep the falls get** (typical worst fall; chance of falls worse than −20%, −30%, −40%)
+- **regime mix** (share of Bull / Sideways / Bear days) and the regime each fund is in today
+- **diversification** (how the funds move together)
+
+It is a research tool, not advice: every simulated future is built from each fund's own past.
 
 ## Run it
 
 On GitHub: **Actions → Run simulation → Run workflow**. It runs the tests, then the simulation, and commits
-the `results/` folder (report, charts, tables).
+the `results/` folder.
 
 Locally (needs internet for Yahoo Finance prices):
 
 ```bash
-uv run python -m mcsim --config config/example_placeholder.toml --out results
-uv run --with pytest python -m pytest -q      # the correctness tests
+uv run python -m mcsim --config config/etf_research.toml --out results
+uv run --with pytest python -m pytest -q
 ```
 
-To use your own strategy, copy `config/example_placeholder.toml`, edit the sleeves, glide path and scenarios,
-and set `placeholder = false`.
+Edit `config/etf_research.toml` to change the funds, the amount, monthly additions, the horizon, the number of
+simulated futures, or the stress case. Fixed-weight mixes of funds can be added under `[mixes]`.
 
 ## What you get
 
-`results/RESULTS.md` is the report: an at-a-glance table, then every chart embedded under its section.
-Files are sorted by category:
+`results/RESULTS.md` is the report: a ranked at-a-glance table, then every chart under its section.
 
 ```
 results/
-├── RESULTS.md                      the report (open this first)
+├── RESULTS.md                     the report (open this first)
 ├── charts/
-│   ├── 1_inputs/                   glide path (stacked bars), sampled history by sleeve (bars)
-│   ├── 2_paths/                    150 simulated futures per scenario (one colour each), percentile fans
-│   ├── 3_outcomes/                 histogram of the value on the valuation date, coloured against the reserve
-│   ├── 4_funding/                  shortfall chance (grouped bars), contribution at 80/90/95% confidence (bars),
-│   │                               contribution ranges (floating bars)
-│   └── 5_risk/                     worst fall in the stress window (histogram), regime mix (stacked bars)
-└── tables/                         the same numbers as CSV: portfolio_values, funding_and_contribution, risk
+│   ├── 1_overview/                outcome ranges per fund (floating bars); history vs stress (grouped bars)
+│   ├── 2_risk_return/             growth vs worst fall (scatter); chance of loss (bars); chance of big falls (grouped bars)
+│   ├── 3_paths/                   60 simulated futures per fund, one colour per path (small multiples)
+│   ├── 4_distributions/           where the money ends up, red below / green above the amount invested
+│   ├── 5_regimes/                 Bull / Sideways / Bear mix (stacked bars) and today's regime
+│   └── 6_diversification/         correlation heatmap
+└── tables/                        fund_summary.csv and correlation.csv: every number above
 ```
 
-Code layout: `mcsim/core.py` (maths), `data.py` (prices), `plots.py` (charts), `tables.py` (CSV),
+Code: `mcsim/core.py` (simulation maths), `data.py` (prices), `plots.py` (charts), `tables.py` (CSV),
 `report.py` (RESULTS.md), `style.py` (colours); `config/` (inputs); `tests/` (checks).
 
-## How it works, in plain words
+## How it works
 
-1. **Sleeves.** The portfolio has three parts: *growth*, *matching* (bonds that fund the payments) and *flex*
-   (short-duration, cash-like). Each is a basket of tickers; the tickers only supply the realistic *shape* of daily
-   returns (how bumpy, how they move together).
-2. **Resampling.** Blocks of 20 real trading days are drawn at random from the last 15 years and stitched into 6-year
-   futures. All sleeves are drawn on the same dates, so their co-movement is kept. 10,000 futures are built.
-3. **Cash flows.** Each 1 January the contribution is added and the portfolio is rebalanced to that year's glide-path
-   weights. Between rebalances the sleeves drift.
-4. **Funding test.** On 1 Jan 2033, reserve = PV of ten payments of $50,000 at the start of each year
-   `PMT × [(1 − (1+r)^−n) ÷ r] × (1+r)`, for several assumed reserve returns r. Funding ratio = value ÷ reserve.
-   Contribution capacity = value − reserve − flexibility amount.
-5. **Scenarios.** Historical averages kept, a haircut of some points a year on a sleeve, or the team's own stated
-   expected returns (history supplies only the shape).
-6. **Regime days.** The growth sleeve's days are labelled Bull / Sideways / Bear with a 20-day return rule (±2%)
-   and counted. This links the simulation to the regime analysis in the Markov-Model repository.
+1. **Prices.** Daily dividend-adjusted closes from Yahoo Finance, up to 20 years per fund (less if the fund is younger).
+2. **Resampling.** Blocks of 20 real consecutive trading days are drawn at random from a fund's history and stitched
+   into a future of the chosen length. Blocks keep short-term momentum and volatility clustering. Repeated
+   10,000 times per fund. Mixes are built from their members' returns on shared dates, so co-movement is kept.
+3. **Money.** The lump sum buys on day 1; each monthly addition buys at that day's simulated price.
+4. **Measures.** Value at the end (against the total invested), growth a year of the price path, worst
+   peak-to-trough fall, and regime days (20-day return above +2% = Bull, below −2% = Bear, otherwise Sideways).
+5. **Stress case.** The same simulation with a fixed number of points a year subtracted from every fund.
 
-## What it is not
+This is a **block-bootstrap Monte Carlo simulation**. It is not Markov chain Monte Carlo (MCMC), which is a sampling
+method from Bayesian statistics; the regime labels are a separate, simple description of each path.
 
-- It is **not Markov chain Monte Carlo (MCMC)** in the technical sense (a sampling method from Bayesian statistics).
-  It is a **block-bootstrap Monte Carlo simulation**. The regime labelling is a separate, simple Markov-style
-  description of the data.
-- The reserve return is a fixed assumption. Yields at the time the reserve is bought are not simulated.
-- No taxes, trading costs or inflation. Payments are fixed in nominal dollars.
-- Results are ranges under stated assumptions, not predictions.
+## Limits
+
+- The past is the only source of randomness, so a decade dominated by one kind of market shapes every simulated future.
+- Funds with different history lengths are compared side by side; younger funds have seen fewer crises (flagged in the report).
+- Nothing longer than a 20-day block is carried over (for example, multi-year cycles).
+- No taxes, currency effects beyond what is in the price, or inflation.
 
 ## How it was checked
 
-`tests/` (14 tests) checks answers that can be worked out by hand: the reserve at each rate matches the
-case study's table ($500,000 / $458,112 / $439,305 / $421,767 …); contributions grow to $450,000 at 0% and
-$562,094 at 4%; a simulation with no randomness equals the closed-form value; sleeve weighting; a built-in
-crash is detected in the right window; resampling keeps correlation and mean; the same seed reproduces the same
-result; invalid glide paths are rejected; every chart, table and link in the report is produced.
+`tests/` (12 tests): with no randomness the simulation equals compound growth, with and without monthly additions;
+a stress haircut lowers growth by about that many points; a built-in crash is caught at exactly the right depth;
+regime counting follows the rule; the same seed reproduces the same result; resampling keeps the mean and the
+correlation between funds; percentiles and probabilities are ordered sensibly; every chart, table and report link exists.
 
 ## AI-assistance disclosure
 
-This code was written with the help of an AI assistant (Claude, Anthropic) in conversation with the repository owner.
-The owner chose the question, the case inputs, the scenarios and what to cite. Anything from this repository used in
-a competition deliverable should be cited as AI-assisted, with the specific outputs used and how they were used.
-Every figure should be re-verified by the team before it is used.
+This code was written with the help of an AI assistant (Claude, Anthropic) in conversation with the repository owner,
+who chose the research question, the funds and the settings. Cite it as AI-assisted wherever its outputs are used.

@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-# one colour per sleeve, used everywhere a sleeve appears
-SLEEVE = {"growth": "#2E8B57", "matching": "#3B6EA8", "flex": "#E0A030"}
 # one colour per scenario, in the order the scenarios appear in the config
 SCENARIO = ["#3B6EA8", "#C8553D", "#7B5EA7", "#2A9D8F", "#8C6D46"]
-# outcome zones against the reserve
+# outcome colours: below vs above the amount invested
 ZONE = {"short": "#D1495B", "thin": "#EDAE49", "ok": "#66A182"}
 REGIME = {"Bear": "#D1495B", "Sideways": "#9AA5B1", "Bull": "#66A182"}
 INK = "#2B2B2B"
@@ -38,3 +36,13 @@ def money(v: float, _pos=None) -> str:
 
 def usd(x: float) -> str:
     return f"${x:,.0f}" if x >= 0 else f"−${-x:,.0f}"
+
+
+FUND_COLOURS = ["#1F77B4", "#2CA02C", "#D62728", "#9467BD", "#FF7F0E", "#17BECF", "#8C564B", "#E377C2",
+                "#BCBD22", "#7F7F7F", "#3B6EA8", "#66A182", "#C8553D", "#7B5EA7", "#E0A030", "#2A9D8F",
+                "#8C6D46", "#5F6673", "#D1495B", "#00798C"]
+
+
+def fund_colors(names: list[str]) -> dict[str, str]:
+    """One distinct colour per fund, stable within a run."""
+    return {n: FUND_COLOURS[i % len(FUND_COLOURS)] for i, n in enumerate(names)}

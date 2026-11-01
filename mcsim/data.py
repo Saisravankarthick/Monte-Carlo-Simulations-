@@ -1,23 +1,20 @@
-"""Load daily total-return data (Yahoo Finance, dividend-adjusted) and build sleeve returns."""
+"""Load daily total-return prices from Yahoo Finance (dividend-adjusted)."""
 
 from __future__ import annotations
 
 import sys
 import time
 
-import numpy as np
 import pandas as pd
 
-from .core import SLEEVES
 
-
-def load_returns(tickers: list[str], years: int) -> pd.DataFrame:
-    """Daily simple returns for all tickers, on the dates every ticker has a price."""
+def load_prices(tickers: list[str], years: int) -> dict[str, pd.Series]:
+    """Adjusted close per ticker, each over as much of the last `years` as the fund has existed."""
     import yfinance as yf
 
     end = pd.Timestamp.now("UTC").tz_localize(None).normalize()
     start = end - pd.DateOffset(years=years)
-    closes = {}
+    out = {}
     for t in tickers:
         df = pd.DataFrame()
         for attempt in (1, 2, 3):
@@ -30,32 +27,27 @@ def load_returns(tickers: list[str], years: int) -> pd.DataFrame:
                 break
             time.sleep(10 * attempt)
         if df.empty:
-            raise RuntimeError(f"no data for {t} from Yahoo Finance")
+            print(f"  ! {t}: no data, skipped", file=sys.stderr)
+            continue
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
-        closes[t] = df["Close"].dropna()
-    px = pd.DataFrame(closes).dropna()
-    return px.pct_change().dropna()
+        out[t] = df["Close"].dropna()
+    return out
 
 
-def sleeve_returns(R: pd.DataFrame, sleeves: dict[str, dict[str, float]]) -> pd.DataFrame:
-    """Weighted daily return of each sleeve (weights inside a sleeve are held constant)."""
-    out = {}
-    for name in SLEEVES:
-        cfg = sleeves[name]
-        w = pd.Series(cfg, dtype=float)
-        if abs(w.sum() - 1) > 1e-9:
-            raise ValueError(f"weights inside sleeve '{name}' must add to 1 (got {w.sum():.4f})")
-        out[name] = (R[w.index] * w).sum(axis=1)
-    return pd.DataFrame(out)
+def returns_of(prices: dict[str, pd.Series]) -> dict[str, pd.Series]:
+    return {t: p.pct_change().dropna() for t, p in prices.items()}
 
 
-def history_summary(S: pd.DataFrame) -> pd.DataFrame:
-    """Annualised mean, volatility and worst fall of each sleeve over the sampled history."""
-    rows = []
-    for name in SLEEVES:
-        r = S[name].to_numpy()
-        eq = np.cumprod(1 + r)
-        rows.append({"sleeve": name, "mean": r.mean() * 252, "vol": r.std(ddof=1) * np.sqrt(252),
-                     "worst_fall": float((eq / np.maximum.accumulate(eq) - 1).min())})
-    return pd.DataFrame(rows).set_index("sleeve")
+def mix_returns(rets: dict[str, pd.Series], weights: dict[str, float]) -> pd.Series:
+    """Daily return of a fixed-weight mix, on the dates every member has data (rebalanced daily)."""
+    w = pd.Series(weights, dtype=float)
+    if abs(w.sum() - 1) > 1e-9:
+        raise ValueError(f"mix weights must add to 1 (got {w.sum():.4f})")
+    df = pd.DataFrame({t: rets[t] for t in w.index}).dropna()
+    return (df * w).sum(axis=1)
+
+
+def correlation(rets: dict[str, pd.Series]) -> pd.DataFrame:
+    """Correlation of daily returns, each pair over the dates both funds have data."""
+    return pd.DataFrame(rets).corr(min_periods=250)
