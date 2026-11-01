@@ -77,6 +77,20 @@ long-run regime mix, buy-and-hold worst fall and Sharpe for every fund, checks t
 same prices, and lists the biggest one-day moves and any gaps. The result is `data_check/DATA_CHECK.md`.
 Refresh `data/markov_stats.json` whenever the Markov repo's report is updated.
 
+## Metropolis-Hastings (separate module)
+
+`mcsim/metropolis.py` is a Metropolis-Hastings sampler (Markov chain Monte Carlo), shown with three Markov chains
+on the Rosenbrock "banana" function: lowering the temperature takes them to the minimum [1, 1, 0], and at a fixed
+temperature they sample exp(−f), whose answer is known exactly. `mcsim/metropolis_audit.py` checks it against known
+answers (detailed balance, the Markov property, the Hastings correction with a negative control, exact moments,
+R-hat, convergence, reproducibility). Output: [`results_metropolis/RESULTS.md`](results_metropolis/RESULTS.md) and
+[`results_metropolis/AUDIT.md`](results_metropolis/AUDIT.md). It needs no internet:
+
+```bash
+uv run python -m mcsim.metropolis --out results_metropolis
+uv run python -m mcsim.metropolis_audit --out results_metropolis
+```
+
 ## How it was checked
 
 `tests/` (12 tests): with no randomness the simulation equals compound growth, with and without monthly additions;
