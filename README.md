@@ -77,19 +77,18 @@ long-run regime mix, buy-and-hold worst fall and Sharpe for every fund, checks t
 same prices, and lists the biggest one-day moves and any gaps. The result is `data_check/DATA_CHECK.md`.
 Refresh `data/markov_stats.json` whenever the Markov repo's report is updated.
 
-## Metropolis-Hastings (separate module)
+## Metropolis-Hastings on the ETFs
 
-`mcsim/metropolis.py` is a Metropolis-Hastings sampler (Markov chain Monte Carlo), shown with three Markov chains
-on the Rosenbrock "banana" function: lowering the temperature takes them to the minimum [1, 1, 0], and at a fixed
-temperature they sample exp(−f), whose answer is known exactly. `mcsim/metropolis_audit.py` checks it against known
-answers (detailed balance, the Markov property, the Hastings correction with a negative control, exact moments,
-R-hat, convergence, reproducibility). Output: [`results_metropolis/RESULTS.md`](results_metropolis/RESULTS.md) and
-[`results_metropolis/AUDIT.md`](results_metropolis/AUDIT.md). It needs no internet:
+`mcsim/mh_etfs.py` fits a model to each ETF in `config/markov_etfs.toml` with Metropolis-Hastings (Markov chain
+Monte Carlo, engine in `mcsim/metropolis.py`). Daily log returns follow a skewed Student-t (fat tails, bigger falls
+than rises); four Markov chains per fund draw the plausible combinations of return, risk, tails and skew. The report
+shows each fund's long-run growth and volatility as ranges, and a 10-year prediction in which every simulated future
+draws its own parameters, so the range includes how unsure ten years of data leave us.
+`mcsim/mh_audit.py` then checks the algorithm against exact answers, recovery of known parameters on made-up data,
+the data, convergence, seed stability, fit and the prediction step.
 
-```bash
-uv run python -m mcsim.metropolis --out results_metropolis
-uv run python -m mcsim.metropolis_audit --out results_metropolis
-```
+On GitHub: **Actions → Metropolis-Hastings ETFs → Run workflow** (downloads prices, fits, predicts, audits, commits
+[`results_mh_etfs/`](results_mh_etfs/RESULTS.md) with [`AUDIT.md`](results_mh_etfs/AUDIT.md)).
 
 ## How it was checked
 
